@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 対応ハーネス版 | harness-doc 0.4.0 |
+| 対応ハーネス版 | harness-doc 0.5.0 |
 | 実装 | `plugins/harness-doc/hooks/scripts/check-docs.mjs` |
 | 検査 | `tests/check-docs.test.mjs`・`tests/check-docs-html.test.mjs` |
 
@@ -81,6 +81,7 @@ glob は `**`（階層をまたぐ）・`*`（またがない）・`?` だけを
 | 5 | リンク切れ | — | `[text](path)` の相対パス。`http:` 等のスキーム付きと `#` 始まりは見ない。`#` 以降は落として解決する |
 | 6 | markdownlint / textlint | `node_modules/.bin/` に実行ファイルがある場合だけ | 非ゼロ終了なら出力を指摘に含める。20秒でタイムアウト |
 | 7 | 文末の混在 | `voice.endings` | `keitai` なら常体の文末（`る。`・`た。`・`だ。`・`ない。`・`である。`）、`jotai` なら敬体の文末（`です。`・`ます。`・`ください。` ほか）を止める。句点で終わる文だけを見る。「」『』の中（画面の文言の引用）は見ない。`null` なら検査しない |
+| 8 | 構造とアクセシビリティ | `rules` | 画像の代替テキスト（Markdown は `![](...)` の空、HTML は `alt` 属性の無い `img`。`alt=""` は飾りとして認める。WCAG 2.2 1.1.1）、見出しレベルの飛び（h2 の次に h4。WCAG の不適合ではなく W3C G141 の推奨）、行き先の分からないリンク文言（「こちら」「ここ」「詳しくはこちら」「click here」だけ。完全一致。WCAG 2.2 2.4.4）、`lang` の無い `html` 要素（WCAG 2.2 3.1.1）。実装は `structure-checks.mjs` |
 
 `docs-style/` のファイルが無ければ、その検査だけ飛ばす。
 
@@ -134,6 +135,7 @@ HTML では、バッククォートはただの文字でインラインコード
 | `linters.textlint` | boolean | true | `false` で実行しない |
 | `glossaryFiles` | string[] | `[]` | プロジェクトが既に持つ用語表（プロジェクトルートからの相対パス）。`docs-style/glossary.md` に加えて読む |
 | `voice.endings` | string | null | `null` | `keitai`（です・ます）/ `jotai`（だ・である）/ `null`（検査しない）。`setup-project` と `change-tone` が `docs-style/voice.md` と揃えて書く |
+| `rules.imageAlt` / `rules.headingSkip` / `rules.linkText` / `rules.htmlLang` | boolean | すべて `true` | 検査 8 を個別に止める。見出しの飛びを意図して使っているプロジェクトは `headingSkip` を `false` にする |
 
 既定値はスクリプト内の `DEFAULT_CONFIG` と `DEFAULT_REQUIRED_HEADINGS` にある。
 設定ファイルの値は既定値に**上書き**される（`requiredHeadings` はキー単位で合成）。

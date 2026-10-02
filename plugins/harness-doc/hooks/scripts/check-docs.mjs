@@ -28,6 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { checkHtmlStructure, checkMarkdownStructure } from "./structure-checks.mjs";
 
 export const SCHEMA_VERSION = 1;
 const CONFIG_RELATIVE_PATH = path.join(".claude", "doc-harness.config.json");
@@ -50,6 +51,8 @@ export const DEFAULT_CONFIG = {
   glossaryFiles: [],
   /** 文体。endings: "keitai"（です・ます）/ "jotai"（だ・である）/ null（検査しない） */
   voice: { endings: null },
+  /** 構造とアクセシビリティの検査（structure-checks.mjs）。false で個別に止められる */
+  rules: { imageAlt: true, headingSkip: true, linkText: true, htmlLang: true },
 };
 
 // ---------------------------------------------------------------------------
@@ -131,6 +134,7 @@ export function loadConfig(dir) {
     requiredHeadings: { ...DEFAULT_REQUIRED_HEADINGS, ...(parsed.requiredHeadings || {}) },
     linters: { ...DEFAULT_CONFIG.linters, ...(parsed.linters || {}) },
     voice: { ...DEFAULT_CONFIG.voice, ...(parsed.voice || {}) },
+    rules: { ...DEFAULT_CONFIG.rules, ...(parsed.rules || {}) },
   };
   return { status: "ok", config };
 }
@@ -472,6 +476,12 @@ function checkHtml(text, { filePath, config, style }) {
 
   // 3. 言語指定は HTML では検査しない（Markdown のフェンスに当たる規約が HTML には無い）
 
+  // 8. 構造とアクセシビリティ
+  const structureBody = raw
+    .replace(HTML_COMMENT, blankKeepLength)
+    .replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, blankKeepLength);
+  issues.push(...checkHtmlStructure(structureBody, rawLines, config, decodeEntities, lineIgnored));
+
   // 5. リンク切れ（href / src の相対パス）
   if (filePath) {
     const baseDir = path.dirname(filePath);
@@ -511,6 +521,9 @@ function checkMarkdown(text, { filePath, config, style }) {
     .map((l) => ({ no: l.no, text: stripInlineCode(l.text) }));
   issues.push(...checkWords(proseText, style));
   issues.push(...checkEndings(proseText, config.voice));
+
+  // 8. 構造とアクセシビリティ
+  issues.push(...checkMarkdownStructure(prose, config, stripInlineCode, lineIgnored));
 
   // 3. コードブロックの言語指定
   for (const l of lines) {

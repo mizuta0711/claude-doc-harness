@@ -40,6 +40,7 @@ jobs:
             plugins/harness-doc/skills/manual-writer/SKILL.md \
             plugins/harness-doc/skills/manual-writer/profiles/*.md \
             plugins/harness-doc/skills/manual-writer/templates/*.md \
+            plugins/harness-doc/skills/manual-writer/references/*.md \
             plugins/harness-doc/skills/manual-writer/examples/good.md \
             plugins/harness-doc/agents/doc-reviewer.md
 

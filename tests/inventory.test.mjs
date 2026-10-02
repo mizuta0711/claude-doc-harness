@@ -56,3 +56,9 @@ test("show.mjs: 同梱の資料だけを返し、パスの抜け出しを拒む"
   assert.equal(resolveDoc("profile", "../../hooks/x"), null);
   assert.equal(resolveDoc("other"), null);
 });
+
+test("show.mjs: 知見のまとめ（reference）5本がそろっている", async () => {
+  const { resolveDoc } = await import("../plugins/harness-doc/presets/show.mjs");
+  for (const n of ["structure", "writing", "japanese", "web", "accessibility"]) assert.ok(fs.existsSync(resolveDoc("reference", n)), n);
+  assert.equal(resolveDoc("reference", "../SKILL"), null);
+});

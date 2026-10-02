@@ -34,7 +34,7 @@ const html = (body) => checkDocument(body, { config: DEFAULT_CONFIG, style, form
 const kinds = (issues) => issues.map((i) => i.kind);
 
 test("本文の曖昧語を検出し、行番号を保つ", () => {
-  const issues = html("<html>\n<body>\n<p>必要に応じて再起動する。</p>\n</body>\n</html>\n");
+  const issues = html('<html lang="ja">\n<body>\n<p>必要に応じて再起動する。</p>\n</body>\n</html>\n');
   assert.deepEqual(kinds(issues), ["banned"]);
   assert.equal(issues[0].line, 3);
 });
@@ -112,7 +112,7 @@ test("リンク切れ: href / src の相対パスを見る。クエリ・アン�
   ].join("\n");
   const issues = checkDocument(body, { filePath: doc, config: DEFAULT_CONFIG, style });
   assert.deepEqual(
-    issues.map((i) => [i.kind, i.line, i.message]),
+    issues.filter((i) => i.kind === "link").map((i) => [i.kind, i.line, i.message]),
     [
       ["link", 5, "リンク切れ: assets/missing.png"],
       ["link", 8, "リンク切れ: gone.html"],
