@@ -8,7 +8,7 @@
     {
       "name": "harness-doc",
       "source": "./plugins/harness-doc",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "description": "ドキュメント作成ハーネス（manual-writer スキル / doc-reviewer エージェント / check-docs フック）。プロジェクト側の docs-style/ と .claude/doc-harness.config.json を契約として動作する"
     }
   ]
