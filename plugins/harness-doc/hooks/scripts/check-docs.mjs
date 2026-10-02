@@ -1,24 +1,25 @@
 /**
- * PostToolUse フック: 文書（.md）の機械チェック
+ * PostToolUse フック: 文書（.md / .html）の機械チェック
  *
- * Write / Edit で .md が書かれた直後に走り、次を検査する。
+ * Write / Edit で .md か .html が書かれた直後に走り、次を検査する。
+ * HTML は本文のテキスト（タグ・属性・script・style・pre・code を除く）と href / src を見る。
  *   1. 必須見出し（文書種別マーカー `<!-- doc-type: howto -->` がある文書だけ）
  *   2. 曖昧語（`docs-style/banned-words.txt`）
- *   3. コードブロックの言語指定
+ *   3. コードブロックの言語指定（Markdown だけ）
  *   4. 用語集との表記ゆれ（`docs-style/glossary.md` の禁止表記）
  *   5. リンク切れ（相対パスのリンク先が存在するか）
- *   6. markdownlint / textlint（プロジェクトに入っていれば実行する）
+ *   6. markdownlint / textlint（Markdown だけ。プロジェクトに入っていれば実行する）
  *
  * 違反があれば理由を stderr に出して終了コード 2 で終わる。
  * PostToolUse の終了コード 2 は「stderr を Claude に見せる」挙動で、Claude が直す。
  *
  * 動作原則（dev-harness と同じ fail-open）:
  *   - `.claude/doc-harness.config.json` が無い → 素通り（ハーネス未導入のプロジェクトを止めない）
- *   - 対象が .md でない / include に当たらない / exclude に当たる → 素通り
+ *   - 対象が .md / .html でない / include に当たらない / exclude に当たる → 素通り
  *   - `docs-style/` のファイルが無い → その検査だけ飛ばす
  *
  * CLI としても使える（テスト・CI 向け）:
- *   node check-docs.mjs <file.md> [...]      指定ファイルを検査し、違反があれば終了コード 2
+ *   node check-docs.mjs <file.md|file.html> [...]      指定ファイルを検査し、違反があれば終了コード 2
  *
  * 依存パッケージは使わない（Node 標準ライブラリのみ）。
  */
@@ -40,7 +41,7 @@ export const DEFAULT_REQUIRED_HEADINGS = {
 export const DEFAULT_CONFIG = {
   schemaVersion: SCHEMA_VERSION,
   styleDir: "docs-style",
-  include: ["docs/**/*.md", "README.md"],
+  include: ["docs/**/*.md", "docs/**/*.html", "README.md"],
   exclude: ["docs/handoff/**", "CHANGELOG.md"],
   requiredHeadings: DEFAULT_REQUIRED_HEADINGS,
   linters: { markdownlint: true, textlint: true },
@@ -250,47 +251,27 @@ function lineIgnored(line) {
  * @param {object} opts.style      loadStyle の結果（null なら docs-style 系の検査を飛ばす）
  * @returns {Array<{ line: number|null, kind: string, message: string }>}
  */
-export function checkDocument(text, { filePath, config, style }) {
+export function checkDocument(text, { filePath, config, style, format }) {
+  const fmt = format || (filePath && isHtmlPath(filePath) ? "html" : "md");
+  if (hasSkipMarker(text)) return [];
+  return fmt === "html" ? checkHtml(text, { filePath, config, style }) : checkMarkdown(text, { filePath, config, style });
+}
+
+/**
+ * 曖昧語と用語集の検査（Markdown・HTML 共通）。
+ * @param {Array<{no:number,text:string}>} lines  検査してよい本文だけを残した行
+ */
+export function checkWords(lines, style) {
   const issues = [];
-  if (hasSkipMarker(text)) return issues;
-
-  const { lines } = tokenizeLines(text);
-  const prose = lines.filter((l) => !l.inCode);
-
-  // 1. 必須見出し
-  const docType = detectDocType(text);
-  if (docType) {
-    const required = (config.requiredHeadings || {})[docType];
-    if (Array.isArray(required) && required.length) {
-      const headings = prose
-        .map((l) => l.text.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/))
-        .filter(Boolean)
-        .map((m) => m[1]);
-      const missing = required.filter((kw) => !headings.some((h) => h.includes(kw)));
-      if (missing.length) {
-        issues.push({
-          line: null,
-          kind: "heading",
-          message: `見出し不足（${docType}）: ${missing.map((m) => `「${m}」`).join(" ")}。見出しにこの語を含めてください`,
-        });
-      }
-    }
-  }
-
-  // 2. 曖昧語 / 4. 用語集
   const bannedWords = style?.bannedWords || [];
   const glossary = style?.glossary || [];
-  for (const l of prose) {
-    if (lineIgnored(l.text)) continue;
-    if (/^\s*<!--/.test(l.text)) continue; // コメント行
-    const t = stripInlineCode(l.text);
-
+  for (const l of lines) {
+    const t = l.text;
     for (const w of bannedWords) {
       if (t.includes(w)) {
         issues.push({ line: l.no, kind: "banned", message: `曖昧語「${w}」: 条件と値を具体的に書く` });
       }
     }
-
     for (const row of glossary) {
       for (const b of row.banned) {
         let idx = t.indexOf(b);
@@ -298,11 +279,7 @@ export function checkDocument(text, { filePath, config, style }) {
           // 禁止表記が推奨表記の先頭部分（例: サーバ / サーバー）なら、その位置は推奨表記として読む
           const isPrefixOfPreferred = row.preferred.startsWith(b) && t.startsWith(row.preferred, idx);
           if (!isPrefixOfPreferred) {
-            issues.push({
-              line: l.no,
-              kind: "glossary",
-              message: `表記ゆれ「${b}」→「${row.preferred}」（用語集）`,
-            });
+            issues.push({ line: l.no, kind: "glossary", message: `表記ゆれ「${b}」→「${row.preferred}」（用語集）` });
             break;
           }
           idx = t.indexOf(b, idx + b.length);
@@ -310,6 +287,146 @@ export function checkDocument(text, { filePath, config, style }) {
       }
     }
   }
+  return issues;
+}
+
+function requiredHeadingIssues(docType, headings, config) {
+  if (!docType) return [];
+  const required = (config.requiredHeadings || {})[docType];
+  if (!Array.isArray(required) || !required.length) return [];
+  const missing = required.filter((kw) => !headings.some((h) => h.includes(kw)));
+  if (!missing.length) return [];
+  return [
+    {
+      line: null,
+      kind: "heading",
+      message: `見出し不足（${docType}）: ${missing.map((m) => `「${m}」`).join(" ")}。見出しにこの語を含めてください`,
+    },
+  ];
+}
+
+/** 相対リンク1件を解決し、存在しなければ指摘を返す（Markdown・HTML 共通） */
+function brokenLinkIssue(target, baseDir, lineNo) {
+  if (!target) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#") || target.startsWith("//")) return null;
+  if (/\$\{|\{\{/.test(target)) return null; // テンプレートの埋め込み
+  const noAnchor = target.split("#")[0].split("?")[0];
+  if (!noAnchor) return null;
+  let decoded = noAnchor;
+  try {
+    decoded = decodeURI(noAnchor);
+  } catch {
+    /* そのまま */
+  }
+  const resolved = path.resolve(baseDir, decoded);
+  if (fs.existsSync(resolved)) return null;
+  return { line: lineNo, kind: "link", message: `リンク切れ: ${target}` };
+}
+
+// ---------------------------------------------------------------------------
+// HTML
+// ---------------------------------------------------------------------------
+
+export function isHtmlPath(p) {
+  return /\.html?$/i.test(String(p));
+}
+
+/** 改行だけを残して、ほかの文字を消す（行番号を保つ） */
+const keepNewlines = (s) => s.replace(/[^\n]/g, "");
+/** 改行以外を空白にする（文字位置も保つ） */
+const blankKeepLength = (s) => s.replace(/[^\n]/g, " ");
+
+const HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+function decodeEntities(s) {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
+    if (e[0] === "#") {
+      const code = e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+    }
+    return HTML_ENTITIES[e.toLowerCase()] ?? m;
+  });
+}
+
+/** 本文として読まない要素。中身ごと検査から外す（Markdown のコードブロック・インラインコードに当たる） */
+const HTML_NON_PROSE = /<(script|style|pre|code|kbd|samp|template|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+const HTML_COMMENT = /<!--[\s\S]*?-->/g;
+
+/**
+ * HTML から本文のテキストだけを行ごとに取り出す。
+ * - コメント・script・style・pre・code・kbd・samp・template・svg は中身ごと外す
+ * - タグは外す（属性値も検査しない）。タグをまたいだ語（`必要に<b>応じて</b>`）も1語として読めるよう、空白は入れない
+ * - 文字実体参照を戻す
+ */
+export function htmlProseLines(text) {
+  const s = String(text)
+    .replace(/\r\n?/g, "\n")
+    .replace(HTML_COMMENT, keepNewlines)
+    .replace(HTML_NON_PROSE, (m) => " " + keepNewlines(m))
+    .replace(/<[^>]*>/g, keepNewlines);
+  return decodeEntities(s)
+    .split("\n")
+    .map((t, i) => ({ no: i + 1, text: t }));
+}
+
+function checkHtml(text, { filePath, config, style }) {
+  const issues = [];
+  const raw = String(text).replace(/\r\n?/g, "\n");
+  const rawLines = raw.split("\n");
+
+  // 1. 必須見出し（h1〜h6）
+  const headings = [];
+  const hRe = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi;
+  let hm;
+  const noComment = raw.replace(HTML_COMMENT, blankKeepLength);
+  while ((hm = hRe.exec(noComment)) !== null) {
+    headings.push(decodeEntities(hm[2].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim());
+  }
+  issues.push(...requiredHeadingIssues(detectDocType(raw), headings, config));
+
+  // 2. 曖昧語 / 4. 用語集
+  const prose = htmlProseLines(raw).filter((l) => !lineIgnored(rawLines[l.no - 1] || ""));
+  issues.push(...checkWords(prose, style));
+
+  // 3. 言語指定は HTML では検査しない（Markdown のフェンスに当たる規約が HTML には無い）
+
+  // 5. リンク切れ（href / src の相対パス）
+  if (filePath) {
+    const baseDir = path.dirname(filePath);
+    const linkSource = raw.replace(HTML_COMMENT, blankKeepLength).replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, blankKeepLength);
+    const aRe = /\b(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+    let m;
+    while ((m = aRe.exec(linkSource)) !== null) {
+      const lineNo = linkSource.slice(0, m.index).split("\n").length;
+      if (lineIgnored(rawLines[lineNo - 1] || "")) continue;
+      const issue = brokenLinkIssue(decodeEntities((m[1] ?? m[2] ?? "").trim()), baseDir, lineNo);
+      if (issue) issues.push(issue);
+    }
+  }
+
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Markdown
+// ---------------------------------------------------------------------------
+
+function checkMarkdown(text, { filePath, config, style }) {
+  const issues = [];
+  const { lines } = tokenizeLines(text);
+  const prose = lines.filter((l) => !l.inCode);
+
+  // 1. 必須見出し
+  const headings = prose
+    .map((l) => l.text.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/))
+    .filter(Boolean)
+    .map((m) => m[1]);
+  issues.push(...requiredHeadingIssues(detectDocType(text), headings, config));
+
+  // 2. 曖昧語 / 4. 用語集
+  const proseText = prose
+    .filter((l) => !lineIgnored(l.text) && !/^\s*<!--/.test(l.text)) // コメント行
+    .map((l) => ({ no: l.no, text: stripInlineCode(l.text) }));
+  issues.push(...checkWords(proseText, style));
 
   // 3. コードブロックの言語指定
   for (const l of lines) {
@@ -327,20 +444,8 @@ export function checkDocument(text, { filePath, config, style }) {
       const t = stripInlineCode(l.text);
       let m;
       while ((m = linkRe.exec(t)) !== null) {
-        const target = m[1];
-        if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#")) continue;
-        const noAnchor = target.split("#")[0];
-        if (!noAnchor) continue;
-        let decoded = noAnchor;
-        try {
-          decoded = decodeURI(noAnchor);
-        } catch {
-          /* そのまま */
-        }
-        const resolved = path.resolve(baseDir, decoded);
-        if (!fs.existsSync(resolved)) {
-          issues.push({ line: l.no, kind: "link", message: `リンク切れ: ${target}` });
-        }
+        const issue = brokenLinkIssue(m[1], baseDir, l.no);
+        if (issue) issues.push(issue);
       }
     }
   }
@@ -386,7 +491,8 @@ export function formatIssues(relPath, issues) {
  * ファイル1本を検査して指摘を返す。対象外なら null。
  */
 export function checkFile(absPath, dir, config, style) {
-  if (!/\.md$/i.test(absPath)) return null;
+  const html = isHtmlPath(absPath);
+  if (!html && !/\.md$/i.test(absPath)) return null;
   const rel = toPosix(path.relative(dir, absPath));
   if (rel.startsWith("../") || path.isAbsolute(rel)) return null;
   const styleRel = toPosix(config.styleDir || "docs-style") + "/";
@@ -396,7 +502,7 @@ export function checkFile(absPath, dir, config, style) {
   if (!fs.existsSync(absPath)) return null;
   const text = fs.readFileSync(absPath, "utf-8");
   const issues = checkDocument(text, { filePath: absPath, config, style });
-  issues.push(...runLinters(dir, absPath, config));
+  if (!html) issues.push(...runLinters(dir, absPath, config)); // markdownlint / textlint は Markdown だけ
   return { rel, issues };
 }
 
@@ -426,7 +532,7 @@ function mainHook() {
 function mainCli(files) {
   const dir = projectDir();
   const { status, config } = loadConfig(dir);
-  const effective = status === "ok" ? config : { ...DEFAULT_CONFIG, include: ["**/*.md"], exclude: [] };
+  const effective = status === "ok" ? config : { ...DEFAULT_CONFIG, include: ["**/*.md", "**/*.html", "**/*.htm"], exclude: [] };
   const style = loadStyle(dir, effective);
   let failed = false;
   for (const f of files) {

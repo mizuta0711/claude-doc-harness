@@ -4,9 +4,9 @@
 
 | 項目 | 内容 |
 |---|---|
-| 対応ハーネス版 | harness-doc 0.1.0 |
+| 対応ハーネス版 | harness-doc 0.3.0 |
 | 実装 | `plugins/harness-doc/hooks/scripts/check-docs.mjs` |
-| 検査 | `tests/check-docs.test.mjs` |
+| 検査 | `tests/check-docs.test.mjs`・`tests/check-docs-html.test.mjs` |
 
 ## 背景と目的
 
@@ -37,7 +37,7 @@ PostToolUse（matcher: `Write|Edit|MultiEdit`）の stdin JSON。使うのは次
 
 環境変数 `CLAUDE_PROJECT_DIR` をプロジェクトルートとする（未設定なら `process.cwd()`）。
 
-CLI としても使える。ファイルを引数に渡すと、設定が無くても `**/*.md` を対象に検査する。
+CLI としても使える。ファイルを引数に渡すと、設定が無くても `**/*.md`・`**/*.html`・`**/*.htm` を対象に検査する。
 
 ```bash
 node plugins/harness-doc/hooks/scripts/check-docs.mjs docs/guide/a.md docs/guide/b.md
@@ -62,7 +62,7 @@ node plugins/harness-doc/hooks/scripts/check-docs.mjs docs/guide/a.md docs/guide
 
 | 条件 | 確認した場所 |
 |---|---|
-| 拡張子が `.md` | `checkFile` |
+| 拡張子が `.md`・`.html`・`.htm` | `checkFile` |
 | プロジェクトルート配下 | 同上 |
 | `styleDir`（既定 `docs-style/`）の外 | 同上 |
 | `include` のいずれかに一致 | `matchesAny` |
@@ -75,13 +75,28 @@ glob は `**`（階層をまたぐ）・`*`（またがない）・`?` だけを
 | # | 検査 | 根拠 | 判定 |
 |---|---|---|---|
 | 1 | 必須見出し | `requiredHeadings[種別]` | 文書種別マーカーがある文書だけ。見出しテキストに語を**含めば**よい（「## 2. 手順」は「手順」に一致） |
-| 2 | 曖昧語 | `docs-style/banned-words.txt` | 散文の行に含まれる。コードブロック内・インラインコード内・`<!--` で始まる行は除く |
+| 2 | 曖昧語 | `docs-style/banned-words.txt` | 本文の行に含まれる。Markdown はコードブロック内・インラインコード内・`<!--` で始まる行を除く。HTML は下の「HTML の本文」を見る |
 | 3 | コードブロックの言語指定 | — | 開きフェンス（```` ``` ```` または `~~~`）の直後が空 |
 | 4 | 用語集の表記ゆれ | `docs-style/glossary.md` の「禁止表記」列 | 散文に含まれる。禁止表記が推奨表記の先頭部分で、その位置が推奨表記として読めるなら検出しない（`サーバ` / `サーバー`） |
 | 5 | リンク切れ | — | `[text](path)` の相対パス。`http:` 等のスキーム付きと `#` 始まりは見ない。`#` 以降は落として解決する |
 | 6 | markdownlint / textlint | `node_modules/.bin/` に実行ファイルがある場合だけ | 非ゼロ終了なら出力を指摘に含める。20秒でタイムアウト |
 
 `docs-style/` のファイルが無ければ、その検査だけ飛ばす。
+
+### HTML の本文
+
+HTML（`.html`・`.htm`）は、本文のテキストだけを取り出して検査する。行番号は元のファイルのものを保つ。
+
+| 扱い | 対象 |
+|---|---|
+| 本文として読む | タグの外のテキスト。文字実体参照（`&nbsp;`・`&amp;`・`&#12354;` の形）は文字に戻す。タグをまたいだ語（`必要に<b>応じて</b>`）は1語として読む |
+| 読まない（中身ごと） | コメント、`script`・`style`・`pre`・`code`・`kbd`・`samp`・`template`・`svg` 要素 |
+| 読まない | 属性値（`alt`・`title` を含む） |
+| リンク切れの対象 | `href`・`src` 属性の相対パス。`?` 以降と `#` 以降は落として解決する。コメントと `script`・`style` の中は見ない |
+| 検査しない | コードブロックの言語指定（Markdown の規約で、HTML には当たる規約が無い）、markdownlint / textlint |
+| 必須見出し | `h1`〜`h6` の中身（入れ子のタグを除いたテキスト） |
+
+HTML では、バッククォートはただの文字でインラインコードにならない。語を説明するために曖昧語を書くときは `<code>` で囲む。
 
 ### 抑止マーカー
 
@@ -98,7 +113,7 @@ glob は `**`（階層をまたぐ）・`*`（またがない）・`?` だけを
 |---|---|---|---|
 | `schemaVersion` | number | 1 | 契約の版。フックの想定より新しければ素通りする |
 | `styleDir` | string | `"docs-style"` | 用語集と曖昧語リストの置き場（プロジェクトルートからの相対） |
-| `include` | string[] | `["docs/**/*.md", "README.md"]` | 検査対象 |
+| `include` | string[] | `["docs/**/*.md", "docs/**/*.html", "README.md"]` | 検査対象 |
 | `exclude` | string[] | `["docs/handoff/**", "CHANGELOG.md"]` | 検査対象から外すもの |
 | `requiredHeadings` | object | howto / reference / spec の3種 | 文書種別ごとの必須見出し。種別を足せる |
 | `linters.markdownlint` | boolean | true | `false` で実行しない |
@@ -110,7 +125,7 @@ glob は `**`（階層をまたぐ）・`*`（またがない）・`?` だけを
 ## 制約
 
 - PostToolUse はツール実行後に走るため、**書き込みそのものは止められない**。差し戻して直させる方式
-- Bash のヒアドキュメント等で書いた `.md` は検査しない（Write / Edit だけが対象）。CLI で手動検査する
+- Bash のヒアドキュメントで書いた文書は検査しない（Write / Edit だけが対象）。CLI で手動検査する
 - 曖昧語と用語集は**部分一致**。`など` が `などころ`に当たるような誤検出は、行末の `ignore` で逃がす
 - 依存パッケージを使わない（Node 標準ライブラリのみ）
 

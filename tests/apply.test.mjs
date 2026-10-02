@@ -71,7 +71,7 @@ test("dev-harness 併用: config の exclude に harness-core のフォルダが
   const conf = JSON.parse(fs.readFileSync(path.join(dest, ".claude", "doc-harness.config.json"), "utf-8"));
   for (const g of DEV_HARNESS_EXCLUDE) assert.ok(conf.exclude.includes(g), g);
   assert.ok(conf.exclude.includes("CHANGELOG.md"), "雛形の exclude も残る");
-  assert.deepEqual(conf.include, ["docs/**/*.md", "README.md"]);
+  assert.deepEqual(conf.include, ["docs/**/*.md", "docs/**/*.html", "README.md"]);
 });
 
 test("dev-harness でなければ config は雛形のまま", () => {

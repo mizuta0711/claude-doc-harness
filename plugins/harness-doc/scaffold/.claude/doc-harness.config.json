@@ -2,7 +2,7 @@
   "$comment": "harness-doc の契約。check-docs フックが読む。schemaVersion が上がったら docs/reference/check-docs仕様.md を見る",
   "schemaVersion": 1,
   "styleDir": "docs-style",
-  "include": ["docs/**/*.md", "README.md"],
+  "include": ["docs/**/*.md", "docs/**/*.html", "README.md"],
   "exclude": ["docs/handoff/**", "CHANGELOG.md"],
   "requiredHeadings": {
     "howto": ["できること", "前提条件", "手順", "確認", "うまくいかない場合"],
