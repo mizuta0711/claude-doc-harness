@@ -1,9 +1,16 @@
 {
-  "$comment": "このリポジトリ自身に harness-doc を適用する（ドッグフーディング）。styleDir はテンプレート層の正本を指す",
+  "$comment": "このリポジトリ自身に harness-doc を適用する（ドッグフーディング）。docs-style/ はハーネス自身の文書用で、プロジェクトに配るのは plugins/harness-doc/scaffold/docs-style/",
   "schemaVersion": 1,
-  "styleDir": "plugins/harness-doc/scaffold/docs-style",
-  "include": ["docs/**/*.md", "README.md", "plugins/**/*.md"],
-  "exclude": ["CHANGELOG.md", "plugins/**/examples/bad.md"],
+  "styleDir": "docs-style",
+  "include": [
+    "docs/**/*.md",
+    "README.md",
+    "plugins/**/*.md"
+  ],
+  "exclude": [
+    "CHANGELOG.md",
+    "plugins/**/examples/bad.md"
+  ],
   "linters": {
     "markdownlint": true,
     "textlint": true

@@ -8,6 +8,7 @@
  *   3. コードブロックの言語指定（Markdown だけ）
  *   4. 用語集との表記ゆれ（`docs-style/glossary.md` の禁止表記）
  *   5. リンク切れ（相対パスのリンク先が存在するか）
+ *   7. 文末の混在（config.voice.endings を設定したときだけ）
  *   6. markdownlint / textlint（Markdown だけ。プロジェクトに入っていれば実行する）
  *
  * 違反があれば理由を stderr に出して終了コード 2 で終わる。
@@ -45,6 +46,10 @@ export const DEFAULT_CONFIG = {
   exclude: ["docs/handoff/**", "CHANGELOG.md"],
   requiredHeadings: DEFAULT_REQUIRED_HEADINGS,
   linters: { markdownlint: true, textlint: true },
+  /** プロジェクトが既に持つ用語表（プロジェクトルートからの相対パス）。docs-style/glossary.md に加えて読む */
+  glossaryFiles: [],
+  /** 文体。endings: "keitai"（です・ます）/ "jotai"（だ・である）/ null（検査しない） */
+  voice: { endings: null },
 };
 
 // ---------------------------------------------------------------------------
@@ -125,6 +130,7 @@ export function loadConfig(dir) {
     ...parsed,
     requiredHeadings: { ...DEFAULT_REQUIRED_HEADINGS, ...(parsed.requiredHeadings || {}) },
     linters: { ...DEFAULT_CONFIG.linters, ...(parsed.linters || {}) },
+    voice: { ...DEFAULT_CONFIG.voice, ...(parsed.voice || {}) },
   };
   return { status: "ok", config };
 }
@@ -141,25 +147,64 @@ export function parseBannedWords(text) {
     .filter((l) => l && !l.startsWith("#"));
 }
 
+const PREFERRED_HEADER = /推奨|使う|✅|正しい/;
+const BANNED_HEADER = /禁止|使わない|❌|誤り|避ける/;
+
+function splitRow(t) {
+  return t
+    .slice(1, t.endsWith("|") ? -1 : undefined)
+    .split("|")
+    .map((c) => c.trim());
+}
+
+/** セルから表記だけを取り出す（インラインコード・強調・✅❌ を外す） */
+function cleanTerm(s) {
+  return stripInlineCode(s)
+    .replace(/\*\*|__/g, "")
+    .replace(/[✅❌]/gu, "")
+    .trim();
+}
+
 /**
- * 用語集の表を読む。列は「推奨表記 | 禁止表記 | 意味」の順。
+ * 用語集の表を読む。**列の並びではなく見出しの語で列を決める。**
+ * - 推奨の列: 見出しに「推奨」「使う」「✅」「正しい」を含む列
+ * - 禁止の列: 見出しに「禁止」「使わない」「❌」「誤り」「避ける」を含む列
+ * 両方の列を持たない表（「役割 | 使う」だけの表など）は読まない。
+ * 見出しの無い表は「推奨 | 禁止 | 意味」の順とみなす（0.1.0 からの書式）。
  * 禁止表記は `、` `,` `/` で複数書ける。`—` `-` 空は「禁止表記なし」。
+ * プロジェクトが既に持つ用語表（例: `.claude/rules/japanese-terms.md` の「対象 | 使う | 使わない」）もこれで読める。
  * 戻り値: [{ preferred, banned: [...] }]
  */
 export function parseGlossary(text) {
   const rows = [];
-  for (const line of String(text).split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t.startsWith("|")) continue;
-    const cells = t
-      .slice(1, t.endsWith("|") ? -1 : undefined)
-      .split("|")
-      .map((c) => c.trim());
-    if (cells.length < 2) continue;
-    if (/^:?-{2,}:?$/.test(cells[0])) continue; // 区切り行
-    if (/推奨/.test(cells[0]) && /禁止/.test(cells[1])) continue; // 見出し行
-    const preferred = stripInlineCode(cells[0]).trim();
-    const bannedCell = stripInlineCode(cells[1]).trim();
+  const lines = String(text).split(/\r?\n/).map((l) => l.trim());
+  let cols = null; // 今の表の { pref, ban }。null なら既定の 0 / 1
+  let inTable = false;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i];
+    if (!t.startsWith("|")) {
+      inTable = false;
+      cols = null;
+      continue;
+    }
+    const cells = splitRow(t);
+    const next = lines[i + 1] || "";
+    const isHeader = !inTable && /^\|\s*:?-{2,}/.test(next);
+    inTable = true;
+    if (isHeader) {
+      const pref = cells.findIndex((c) => PREFERRED_HEADER.test(c));
+      const ban = cells.findIndex((c) => BANNED_HEADER.test(c));
+      cols = pref >= 0 && ban >= 0 ? { pref, ban } : { skip: true };
+      i++; // 区切り行を飛ばす
+      continue;
+    }
+    if (cols?.skip) continue;
+    const pref = cols ? cols.pref : 0;
+    const ban = cols ? cols.ban : 1;
+    if (cells.length <= Math.max(pref, ban)) continue;
+    if (/^:?-{2,}:?$/.test(cells[0])) continue;
+    const preferred = cleanTerm(cells[pref]);
+    const bannedCell = cleanTerm(cells[ban]);
     if (!preferred) continue;
     const banned = /^(—|-|–|なし)?$/.test(bannedCell)
       ? []
@@ -170,6 +215,37 @@ export function parseGlossary(text) {
     rows.push({ preferred, banned });
   }
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// 文末（敬体／常体）の混在
+// ---------------------------------------------------------------------------
+
+/**
+ * voice.endings が "keitai"（です・ます）なら常体の文末を、"jotai"（だ・である）なら敬体の文末を止める。
+ * 「」『』の中（画面の文言の引用）は見ない。句点「。」で終わる文だけを見る（体言止め・箇条書きは対象外）。
+ */
+const ENDING_RULES = {
+  keitai: { re: /(である|のだ|だ|ではない|ない|た|る)。/, label: "常体", want: "敬体（です・ます）" },
+  jotai: { re: /(です|ます|ました|でした|ません|ください|ましょう)。/, label: "敬体", want: "常体（だ・である）" },
+};
+
+export function checkEndings(lines, voice) {
+  const rule = ENDING_RULES[voice?.endings];
+  if (!rule) return [];
+  const issues = [];
+  for (const l of lines) {
+    const t = l.text.replace(/「[^」]*」|『[^』]*』/g, "");
+    const m = t.match(rule.re);
+    if (m) {
+      issues.push({
+        line: l.no,
+        kind: "voice",
+        message: `文末が${rule.label}（「${m[0]}」）: この文書の文体は${rule.want}（docs-style/voice.md）`,
+      });
+    }
+  }
+  return issues;
 }
 
 function stripInlineCode(s) {
@@ -184,10 +260,16 @@ export function loadStyle(dir, config) {
   };
   const banned = read("banned-words.txt");
   const glossary = read("glossary.md");
+  // プロジェクトが既に持つ用語表（例: .claude/rules/japanese-terms.md）も読む
+  const extra = (config.glossaryFiles || [])
+    .map((rel) => path.join(dir, rel))
+    .filter((f) => fs.existsSync(f))
+    .flatMap((f) => parseGlossary(fs.readFileSync(f, "utf-8")));
+  const parsed = glossary === null ? null : parseGlossary(glossary);
   return {
     styleDir,
     bannedWords: banned === null ? null : parseBannedWords(banned),
-    glossary: glossary === null ? null : parseGlossary(glossary),
+    glossary: parsed === null && !extra.length ? null : [...(parsed || []), ...extra],
   };
 }
 
@@ -386,6 +468,7 @@ function checkHtml(text, { filePath, config, style }) {
   // 2. 曖昧語 / 4. 用語集
   const prose = htmlProseLines(raw).filter((l) => !lineIgnored(rawLines[l.no - 1] || ""));
   issues.push(...checkWords(prose, style));
+  issues.push(...checkEndings(prose, config.voice));
 
   // 3. 言語指定は HTML では検査しない（Markdown のフェンスに当たる規約が HTML には無い）
 
@@ -427,6 +510,7 @@ function checkMarkdown(text, { filePath, config, style }) {
     .filter((l) => !lineIgnored(l.text) && !/^\s*<!--/.test(l.text)) // コメント行
     .map((l) => ({ no: l.no, text: stripInlineCode(l.text) }));
   issues.push(...checkWords(proseText, style));
+  issues.push(...checkEndings(proseText, config.voice));
 
   // 3. コードブロックの言語指定
   for (const l of lines) {

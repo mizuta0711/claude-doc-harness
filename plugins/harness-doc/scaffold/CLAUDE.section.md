@@ -21,5 +21,8 @@ claude-dev-harness を併用している場合、設計書・機能設計書・�
    `docs-style/README.md` に書いてある場合に限る
 6. 用語は `docs-style/glossary.md` に揃える。新しい用語を使うときは先に用語集へ足す。
    曖昧語は `docs-style/banned-words.txt` にある。使いたくなったら条件と値を書く
+7. **文体と見た目は `docs-style/voice.md` に従う。** 既存の文書や CSS から読み取ったものを踏襲している。
+   テイストを変えたいと頼まれたら、本文を直接書き換えずに `/harness-doc:change-tone` を使う
+   （見本で合意してから、事実と構成を変えずに書き換え、voice.md も更新する）
 
 > 使い方の全体は [docs-style/README.md](docs-style/README.md) にある。

@@ -15,6 +15,22 @@ docs 影響: なし
 
 ---
 
+## 0.4.0 — 2026-10-02
+
+**導入を対話にし、文書のテイストを決めて変えられるようにした。**
+
+- `setup-project` を対話型に書き直した。棚卸し（`scripts/inventory.mjs`）で新規か既存かを見分ける。既存なら、文書の置き場所・文体・表記の好み・用語表・CSS を読み取って踏襲する案を確かめてもらう。新規なら文体の見本（4種）と見た目の方向性（3種）から選んでもらう。質問は `AskUserQuestion`
+- `change-tone` スキルを追加。今の文と変えた後の文を並べて合意してから、事実・構成・画面名・コードは変えずに書き換え、`voice.md` も更新する。HTML の見た目は CSS の値だけを変える
+- `docs-style/voice.md`（文体と見た目の決まり）を雛形に追加。`manual-writer` は書く前に読み、`doc-reviewer` は沿っているかを点検する
+- `check-docs`: 文末の混在検査（`voice.endings`: `keitai` / `jotai`）、既存の用語表の読み込み（`glossaryFiles`）、用語表の列を見出しの語で決める読み方（「使う / 使わない」「❌ / ✅」の表も読める）
+- **既定値の見直し（実物検査で判明した課題）。** 雛形の用語集を空にした（「サーバー」などの好みはプロジェクトが決める）。曖昧語の初期値から「など」を外した（例示の正しい用法が多い。行頭の `#` を外せば有効になる）
+- `apply.mjs --config`: 決めた値を `.claude/doc-harness.config.json` に書き込む（`.claude/` への Edit は確認が出るため）
+- `presets/show.mjs`: 見本集と読者プロファイルを `node` で出力する（プラグインの置き場所はプロジェクトの外で、`Read` だと確認が出る・拒否されるため）
+- ハーネス自身の文書用の用語集を、リポジトリ直下の `docs-style/` に分けた
+- テスト: `voice-and-glossary.test.mjs`・`inventory.test.mjs` を追加
+
+docs 影響: あり（README.md・guide/ 全体・reference/check-docs仕様.md・diagrams/ 新設・scaffold/docs-style/README.md）
+
 ## 0.3.0 — 2026-10-02
 
 **check-docs が HTML を検査する。** 手書きの HTML で書かれた利用者向けサイト・マニュアルにも機械チェックを効かせるため。

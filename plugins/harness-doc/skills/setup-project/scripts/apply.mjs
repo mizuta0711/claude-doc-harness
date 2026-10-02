@@ -4,6 +4,10 @@
  * setup-project スキルから呼ばれる。人が直接打つことは想定していない。
  *
  *   node apply.mjs [--dest <project-dir>] [--dry-run] [--json]
+ *   node apply.mjs [--dest <project-dir>] --config <json>    既存の config に値を書き込む（include・glossaryFiles・voice ほか）
+ *
+ * --config は、スキルが利用者と決めた値を `.claude/doc-harness.config.json` に書き込むためにある。
+ * `.claude/` 配下は Claude Code が書き込みに確認を求める場所なので、Edit ではなくこのスクリプトで書く。
  *
  * 動作:
  *   - --dest を省略すると CLAUDE_PROJECT_DIR（無ければカレントディレクトリ）を導入先にする
@@ -53,13 +57,14 @@ export function configFor(templateText, devHarness) {
 }
 
 export function parseArgs(argv) {
-  const out = { dest: null, dryRun: false, json: false };
+  const out = { dest: null, dryRun: false, json: false, config: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dest") out.dest = argv[++i];
     else if (a.startsWith("--dest=")) out.dest = a.slice("--dest=".length);
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--json") out.json = true;
+    else if (a === "--config") out.config = argv[++i];
     else if (a === "-h" || a === "--help") out.help = true;
     else throw new Error(`不明な引数: ${a}`);
   }
@@ -125,6 +130,21 @@ export function apply(templateDir, dest, items) {
   }
 }
 
+/**
+ * config に値を書き込む。オブジェクト（voice ほか）は1段だけ合成し、配列（include ほか）は置き換える。
+ * 知らないキーは拒否する（綴りの誤りで黙って効かない設定を作らない）。
+ */
+export const CONFIG_KEYS = ["styleDir", "include", "exclude", "requiredHeadings", "linters", "glossaryFiles", "voice"];
+export function mergeConfig(current, patch) {
+  const unknown = Object.keys(patch).filter((k) => !CONFIG_KEYS.includes(k));
+  if (unknown.length) throw new Error(`知らない設定キー: ${unknown.join(", ")}`);
+  const out = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    out[k] = v && typeof v === "object" && !Array.isArray(v) ? { ...(current[k] || {}), ...v } : v;
+  }
+  return out;
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const say = (line) => process.stdout.write(line + NL);
@@ -136,6 +156,17 @@ function main() {
   if (!fs.existsSync(dest)) {
     process.stderr.write(`dest が存在しません: ${dest}` + NL);
     process.exit(1);
+  }
+  if (args.config !== null) {
+    const file = path.join(dest, CONFIG_REL);
+    if (!fs.existsSync(file)) {
+      process.stderr.write(`config がありません。先に --config なしで適用する: ${file}` + NL);
+      process.exit(1);
+    }
+    const next = mergeConfig(JSON.parse(fs.readFileSync(file, "utf-8")), JSON.parse(args.config));
+    if (!args.dryRun) fs.writeFileSync(file, JSON.stringify(next, null, 2) + NL);
+    say(JSON.stringify(next, null, 2));
+    return;
   }
   const devHarness = isDevHarnessProject(dest);
   const items = plan(SCAFFOLD_DIR, dest);

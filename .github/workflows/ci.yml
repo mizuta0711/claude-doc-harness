@@ -32,7 +32,9 @@ jobs:
           set -e
           node plugins/harness-doc/hooks/scripts/check-docs.mjs \
             README.md \
-            docs/guide/*.md docs/reference/*.md docs/background/*.md \
+            docs/guide/*.md docs/reference/*.md docs/background/*.md docs/diagrams/*.md \
+            plugins/harness-doc/skills/change-tone/SKILL.md \
+            plugins/harness-doc/presets/*.md \
             plugins/harness-doc/scaffold/CLAUDE.section.md \
             plugins/harness-doc/skills/setup-project/SKILL.md \
             plugins/harness-doc/skills/manual-writer/SKILL.md \

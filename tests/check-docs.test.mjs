@@ -26,7 +26,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const scriptPath = path.join(repoRoot, "plugins", "harness-doc", "hooks", "scripts", "check-docs.mjs");
 const scaffoldDir = path.join(repoRoot, "plugins", "harness-doc", "scaffold");
-const styleDir = path.join(scaffoldDir, "docs-style");
+// 検査ロジックの試験には、項目の揃ったハーネス自身の docs-style を使う（scaffold の用語集は空で配る）
+const styleDir = path.join(repoRoot, "docs-style");
 
 const style = {
   bannedWords: parseBannedWords(fs.readFileSync(path.join(styleDir, "banned-words.txt"), "utf-8")),

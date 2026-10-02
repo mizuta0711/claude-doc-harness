@@ -19,7 +19,8 @@ Claude Code でマニュアル・手順書・仕様書を**同じ水準で再現
 | スキル | `/harness-doc:manual-writer` | 文書を書く手順の本体。読者とゴールの決定 → 事実確認 → 目次案 → 本文 → 自己点検 → 読者役レビュー → 機械チェック |
 | エージェント | `doc-reviewer` | 予備知識のない読者になりきり、文書だけで作業できるかを点検する。文書は書き換えず指摘だけ返す |
 | フック | `check-docs` | Markdown（`.md`）か HTML（`.html`）を書くたびに曖昧語・必須見出し・コードブロックの言語指定・用語集との表記ゆれ・リンク切れを検査する。違反は Claude に差し戻す |
-| スキル | `/harness-doc:setup-project` | 今のプロジェクトへ導入する。`CLAUDE.md` の文書ルールの節・`docs-style/`（用語集・曖昧語リスト・使い方）・`.claude/doc-harness.config.json` を置く。原本は `plugins/harness-doc/scaffold/` |
+| スキル | `/harness-doc:change-tone` | 既存の文書のテイスト（文体・表記・HTML の見た目）を変える。見本で合意してから、事実と構成は変えずに書き換える |
+| スキル | `/harness-doc:setup-project` | 今のプロジェクトへ**対話で**導入する。既存の文書があれば文体・用語表・見た目を読み取って踏襲し、新規なら見本の文から選んでもらう。`CLAUDE.md` の文書ルールの節・`docs-style/`（用語集・曖昧語リスト・使い方）・`.claude/doc-harness.config.json` を置く。原本は `plugins/harness-doc/scaffold/` |
 
 文書の種類（手順書・リファレンス・仕様書）によらず進め方は共通で、種類ごとに変えるのは
 **読者プロファイル・テンプレート・検証方法の3点だけ**。読者プロファイルは
@@ -65,10 +66,14 @@ claude-dev-harness を導入済みのプロジェクトでは、設計書・機�
 |---|---|---|
 | [`guide/`](docs/guide/) | ハーネスを**使う人** | 通しで読む。導入・運用の手順 |
 | [`reference/`](docs/reference/) | ハーネスを**直す人・設定を触る人** | **引く。** 仕様と方針 |
+| [`diagrams/`](docs/diagrams/) | 両方 | 構造・流れを掴むとき（mermaid の図） |
 | [`background/`](docs/background/) | 両方 | **なぜこの設計なのか**で迷ったとき |
 
 | 文書 | 内容 |
 |---|---|
+| [入門ガイド](docs/guide/入門ガイド.md) | **初めて使う人向け。** 期待してよいこと・3つの原則・最初の1本・つまずきポイント |
+| [運用ガイド](docs/guide/運用ガイド.md) | スキルの使い分け・決まり（docs-style）の育て方・dev-harness との併用 |
+| [図（diagrams/）](docs/diagrams/) | 全体構成 / 文書作成フロー / 導入フロー / フック検査の流れ / テイスト変更フロー の5本 |
 | [セットアップガイド](docs/guide/セットアップガイド.md) | 導入・確認・取り外し。**このハーネス自身で書いたサンプル文書**でもある |
 | [check-docs 仕様](docs/reference/check-docs仕様.md) | フックの検査項目・設定ファイルの契約・抑止マーカー |
 | [設計の前提](docs/background/01_設計の前提.md) | なぜプラグイン＋テンプレート層か、なぜ読者役を分離するか |

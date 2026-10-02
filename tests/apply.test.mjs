@@ -38,6 +38,7 @@ test("空のプロジェクト: 全部置き、CLAUDE.md は新規に作る", ()
     "docs-style/README.md": "copy",
     "docs-style/banned-words.txt": "copy",
     "docs-style/glossary.md": "copy",
+    "docs-style/voice.md": "copy",
   });
   apply(SCAFFOLD_DIR, dest, items);
   assert.match(fs.readFileSync(path.join(dest, "CLAUDE.md"), "utf-8"), /## 文書ルール（harness-doc）/);
@@ -91,4 +92,28 @@ test("CLI: --dest 省略時は CLAUDE_PROJECT_DIR を使い、--json で計画�
   assert.equal(out.dryRun, true);
   assert.equal(out.devHarness, false);
   assert.equal(fs.readdirSync(dest).length, 0, "dry-run は書き込まない");
+});
+
+test("--config: 配列は置き換え、voice は合成し、知らないキーは拒否する", async () => {
+  const { mergeConfig } = await import("../plugins/harness-doc/skills/setup-project/scripts/apply.mjs");
+  const cur = { include: ["docs/**/*.md"], voice: { endings: null }, exclude: ["CHANGELOG.md"] };
+  assert.deepEqual(mergeConfig(cur, { include: ["web/**/*.html"], voice: { endings: "keitai" } }), {
+    include: ["web/**/*.html"],
+    voice: { endings: "keitai" },
+    exclude: ["CHANGELOG.md"],
+  });
+  assert.throws(() => mergeConfig(cur, { inclde: [] }), /知らない設定キー: inclde/);
+});
+
+test("--config CLI: 導入済みの config に書き込む。未導入なら止まる", () => {
+  const dest = tmp();
+  const run = (args) => spawnSync(process.execPath, [scriptPath, "--dest", dest, ...args], { encoding: "utf-8" });
+  assert.equal(run(["--config", '{"voice":{"endings":"jotai"}}']).status, 1, "未導入");
+  assert.equal(run([]).status, 0);
+  const r = run(["--config", '{"glossaryFiles":[".claude/rules/terms.md"],"voice":{"endings":"jotai"}}']);
+  assert.equal(r.status, 0, r.stderr);
+  const conf = JSON.parse(fs.readFileSync(path.join(dest, ".claude", "doc-harness.config.json"), "utf-8"));
+  assert.deepEqual(conf.glossaryFiles, [".claude/rules/terms.md"]);
+  assert.deepEqual(conf.voice, { endings: "jotai" });
+  assert.deepEqual(conf.include, ["docs/**/*.md", "docs/**/*.html", "README.md"], "触らないキーは残る");
 });
