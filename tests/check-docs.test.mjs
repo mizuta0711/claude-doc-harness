@@ -25,7 +25,8 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const scriptPath = path.join(repoRoot, "plugins", "harness-doc", "hooks", "scripts", "check-docs.mjs");
-const styleDir = path.join(repoRoot, "templates", "base", "docs-style");
+const scaffoldDir = path.join(repoRoot, "plugins", "harness-doc", "scaffold");
+const styleDir = path.join(scaffoldDir, "docs-style");
 
 const style = {
   bannedWords: parseBannedWords(fs.readFileSync(path.join(styleDir, "banned-words.txt"), "utf-8")),
@@ -186,7 +187,7 @@ function makeProject() {
   fs.mkdirSync(path.join(dir, "docs"), { recursive: true });
   fs.cpSync(styleDir, path.join(dir, "docs-style"), { recursive: true });
   fs.copyFileSync(
-    path.join(repoRoot, "templates", "base", ".claude", "doc-harness.config.json"),
+    path.join(scaffoldDir, ".claude", "doc-harness.config.json"),
     path.join(dir, ".claude", "doc-harness.config.json")
   );
   return dir;

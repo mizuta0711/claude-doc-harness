@@ -33,7 +33,8 @@ jobs:
           node plugins/harness-doc/hooks/scripts/check-docs.mjs \
             README.md \
             docs/guide/*.md docs/reference/*.md docs/background/*.md \
-            templates/base/CLAUDE.section.md \
+            plugins/harness-doc/scaffold/CLAUDE.section.md \
+            plugins/harness-doc/skills/setup-project/SKILL.md \
             plugins/harness-doc/skills/manual-writer/SKILL.md \
             plugins/harness-doc/skills/manual-writer/profiles/*.md \
             plugins/harness-doc/skills/manual-writer/templates/*.md \

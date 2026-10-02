@@ -33,6 +33,18 @@ allowed-tools: "Read, Grep, Glob, Write, Edit, Bash, Agent"
 良い例と悪い例は [examples/good.md](examples/good.md) と [examples/bad.md](examples/bad.md) にある。
 **書く前に両方読む。** 悪い例には「なぜ悪いか」が付いている。
 
+## Step 0: プロジェクトに導入済みかを確かめる
+
+プロジェクトのルートに `.claude/doc-harness.config.json` があるかを確かめる。
+
+- **ある**: Step 1 へ進む
+- **無い**: このままでは `check-docs` フックが動かず、用語集も無い。利用者に「このプロジェクトに
+  文書ハーネスを導入してから書く」ことを1行で伝えて了承を得たら、`/harness-doc:setup-project` を
+  実行してから Step 1 へ進む。断られたら、フックと用語集なしで書くことを完了報告に明記する
+
+書く文書が config の `exclude` に当たる場合（claude-dev-harness の `docs/設計書/`・`docs/features/`・`docs/reviews/`・`docs/handoff/`）は、このスキルの対象外。
+その旨を伝え、harness-core のスキル（`update-docs` ほか）に任せる。
+
 ## Step 1: 読者とゴールを決める
 
 $ARGUMENTS と会話から、次を **1〜2文**で書く。
@@ -127,10 +139,11 @@ $ARGUMENTS と会話から、次を **1〜2文**で書く。
 
 `.md` を書くたびに `check-docs` フックが走る。失敗したら指摘を直す。
 
-手動で確かめるときは、プロジェクトのルートで次を実行する。
+Write / Edit 以外（Bash のヒアドキュメントや sed）で書いた場合はフックが走らないので、
+プロジェクトのルートで次を実行して確かめる（`${CLAUDE_SKILL_DIR}` は絶対パスに置き換えて書く）。
 
 ```bash
-node "<claude-doc-harness のパス>/plugins/harness-doc/hooks/scripts/check-docs.mjs" docs/guide/対象.md
+node "${CLAUDE_SKILL_DIR}/../../hooks/scripts/check-docs.mjs" docs/guide/対象.md
 ```
 
 `[check-docs] OK: ...` と出れば通過。検査の抑止（`<!-- check-docs: skip -->`）は

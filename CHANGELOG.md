@@ -15,6 +15,26 @@ docs 影響: なし
 
 ---
 
+## 0.2.0 — 2026-10-02
+
+**利用者がコマンドを打たずに導入できるようにした。** 0.1.0 はテンプレート層を `tools/apply.mjs` で
+人が置く前提だったが、利用者はコマンドを打たない。
+
+- `setup-project` スキルを追加。「このプロジェクトに文書ハーネスを入れて」で、エージェントが
+  `CLAUDE.md` の節・`docs-style/`・`.claude/doc-harness.config.json` を置く。既存ファイルは上書きしない
+- テンプレート層 `templates/base/` を **プラグイン内の `plugins/harness-doc/scaffold/` へ移した**。
+  プラグインのキャッシュ単体で導入でき、ネットワークも clone も要らない。版もプラグインと1つになる
+- `tools/apply.mjs` を `skills/setup-project/scripts/apply.mjs` へ移した。`--dest` 省略時は今のプロジェクト、`--json` で計画を返す
+- **claude-dev-harness との併用。** `.claude/harness.config.json` があるプロジェクトでは、
+  `docs/設計書/`・`docs/features/`・`docs/reviews/`・`docs/handoff/` を検査対象から外した設定を置く
+  （harness-core の `update-docs` が設計書を書くたびに止まらないように）。CLAUDE.md の節にも対象範囲を書いた
+- `manual-writer` に Step 0 を追加。設定が無いプロジェクトでは導入を提案し、了承を得て `setup-project` を通す。
+  `exclude` に当たる文書（設計書）は対象外として harness-core に任せる
+- `docs-style/README.md` とセットアップガイドを「Claude Code に頼む」形に書き直した
+- テスト: `tests/apply.test.mjs`（6件）を追加
+
+docs 影響: あり（README.md・guide/セットアップガイド.md・scaffold/docs-style/README.md）
+
 ## 0.1.0 — 2026-10-02
 
 初版。

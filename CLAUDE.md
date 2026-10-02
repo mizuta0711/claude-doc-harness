@@ -1,7 +1,7 @@
 # claude-doc-harness — 開発ルール
 
 **このファイルは「ハーネス自体を開発するとき」の規律である。**
-ハーネスが置くプロジェクト側の `CLAUDE.md` の節（`templates/base/CLAUDE.section.md`）とは別物。
+ハーネスが置くプロジェクト側の `CLAUDE.md` の節（`plugins/harness-doc/scaffold/CLAUDE.section.md`）とは別物。
 
 リポジトリの構成・提供物・利用側の手順は [README.md](README.md) にある。ここには複製しない。
 対話は日本語で行うこと。
@@ -49,7 +49,7 @@ git commit --amend           # ⚠️ インデックス全体を取り込む
 ## 4. このリポジトリ自身がハーネスの検査対象
 
 `.claude/settings.json` で `check-docs` を自分の `docs/` と `plugins/` の `.md` に当てている
-（`.claude/doc-harness.config.json` の `styleDir` は `templates/base/docs-style` を指す）。
+（`.claude/doc-harness.config.json` の `styleDir` は `plugins/harness-doc/scaffold/docs-style` を指す）。
 **ハーネスの文書が、ハーネスの規則に違反していてはいけない。**
 
 - 曖昧語の説明に曖昧語そのものを書くときは、インラインコードで囲む

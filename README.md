@@ -4,9 +4,9 @@ Claude Code でマニュアル・手順書・仕様書を**同じ水準で再現
 プログラムにテスト・リンタ・CI を整えるのと同じ考え方で、文書作成にも
 **型・手順・自動チェック・レビュー**を整備する。
 
-共通部分を**プラグイン**（`plugins/harness-doc`）として配信し、プロジェクトごとに違うもの
-（用語集・曖昧語リスト・`CLAUDE.md` の節・検査対象の設定）は薄い**テンプレート層**（`templates/base`）で置く。
-構成は開発ハーネス [claude-dev-harness](https://github.com/mizuta0711/claude-dev-harness) と同じ。
+スキル・エージェント・フック・プロジェクト側に置くファイルの原本を、すべて**1つのプラグイン**（`plugins/harness-doc`）として配る。
+プロジェクトへの導入もスキル（`setup-project`）が行うので、**利用者はコマンドを打たずに Claude Code に頼むだけでよい**。
+開発ハーネス [claude-dev-harness](https://github.com/mizuta0711/claude-dev-harness) と併用できる。
 
 **このリポジトリは、ハーネスを自分のプロジェクトへ導入して使う人向け。**
 「なぜこの設計か」「次に何を変えるか」を決める側の検討・査読・作業指示は、
@@ -19,7 +19,7 @@ Claude Code でマニュアル・手順書・仕様書を**同じ水準で再現
 | スキル | `/harness-doc:manual-writer` | 文書を書く手順の本体。読者とゴールの決定 → 事実確認 → 目次案 → 本文 → 自己点検 → 読者役レビュー → 機械チェック |
 | エージェント | `doc-reviewer` | 予備知識のない読者になりきり、文書だけで作業できるかを点検する。文書は書き換えず指摘だけ返す |
 | フック | `check-docs` | `.md` を書くたびに曖昧語・必須見出し・コードブロックの言語指定・用語集との表記ゆれ・リンク切れを検査する。違反は Claude に差し戻す |
-| テンプレート層 | `templates/base/` | `CLAUDE.md` の文書ルールの節、`docs-style/`（用語集・曖昧語リスト・使い方）、`.claude/doc-harness.config.json` |
+| スキル | `/harness-doc:setup-project` | 今のプロジェクトへ導入する。`CLAUDE.md` の文書ルールの節・`docs-style/`（用語集・曖昧語リスト・使い方）・`.claude/doc-harness.config.json` を置く。原本は `plugins/harness-doc/scaffold/` |
 
 文書の種類（手順書・リファレンス・仕様書）によらず進め方は共通で、種類ごとに変えるのは
 **読者プロファイル・テンプレート・検証方法の3点だけ**。読者プロファイルは
@@ -27,27 +27,37 @@ beginner（初めて使う人）/ operator（障害時に焦って読む運用�
 
 ## クイックスタート
 
-```bash
-# 1. プラグインを入れる（このマシンの全プロジェクト共通）
+**このマシンで初めて使うとき（1回だけ）。** Claude Code に次のように頼む。
+
+```text
+次の2つのコマンドを実行して、文書ハーネスのプラグインを入れて。
 claude plugin marketplace add mizuta0711/claude-doc-harness
 claude plugin install harness-doc@doc-harness --scope user
-
-# 2. プロジェクトへテンプレート層を置く（既存ファイルは上書きしない。CLAUDE.md には追記する）
-node <claude-doc-harness のパス>/tools/apply.mjs --dest <プロジェクトのパス>
-
-# 3. Claude Code を再起動する
 ```
 
-期待される状態: `claude plugin list` に `harness-doc` が出る。プロジェクトに `docs-style/` と
-`.claude/doc-harness.config.json` がある。`CLAUDE.md` の末尾に「文書ルール（harness-doc）」の節がある。
+終わったら Claude Code を再起動する。
 
-使い方は、適用したプロジェクトの `docs-style/README.md`（1ページ）に書いてある。
+**プロジェクトごとに（1回だけ）。** そのプロジェクトで Claude Code に頼む。
+
+```text
+このプロジェクトに文書ハーネスを入れて
+```
+
+`setup-project` スキルが `CLAUDE.md` に節を足し、`docs-style/` と設定ファイルを置く。既存ファイルは上書きしない。
+claude-dev-harness を導入済みのプロジェクトでは、設計書・機能設計書・レビュー記録・引き継ぎを検査対象から自動で外す。
+導入しないまま文書を頼んだ場合も、`manual-writer` が導入を提案する。
+
+**あとは頼むだけ。**
+
+```text
+障害時の復旧手順書を書いて。読者は運用担当
+```
+
+使い方は、導入したプロジェクトの `docs-style/README.md`（1ページ）にある。
 導入の詳細とつまずきは [docs/guide/セットアップガイド.md](docs/guide/セットアップガイド.md)。
 
-> ⚠️ **`claude plugin install` を飛ばすとスキルも hooks も動かない。** `apply.mjs` はテンプレート層しか置かない。
->
 > ⚠️ **フックは `.claude/doc-harness.config.json` が無いプロジェクトでは何もしない**（設定不在は素通り）。
-> 検査が動かないときは、まずこのファイルの有無を見る。
+> 検査が動かないときは「このプロジェクトに文書ハーネスを入れて」と頼む。
 
 ## ドキュメント
 

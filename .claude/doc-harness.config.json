@@ -1,8 +1,8 @@
 {
   "$comment": "このリポジトリ自身に harness-doc を適用する（ドッグフーディング）。styleDir はテンプレート層の正本を指す",
   "schemaVersion": 1,
-  "styleDir": "templates/base/docs-style",
-  "include": ["docs/**/*.md", "README.md", "templates/**/*.md", "plugins/**/*.md"],
+  "styleDir": "plugins/harness-doc/scaffold/docs-style",
+  "include": ["docs/**/*.md", "README.md", "plugins/**/*.md"],
   "exclude": ["CHANGELOG.md", "plugins/**/examples/bad.md"],
   "linters": {
     "markdownlint": true,
