@@ -1,0 +1,15 @@
+{
+  "name": "doc-harness",
+  "description": "Claude Code でマニュアル・手順書・仕様書を同じ水準で再現可能に書くためのドキュメント作成ハーネス。読者プロファイル・読者役レビュー・機械チェックを提供する",
+  "owner": {
+    "name": "mizuta0711"
+  },
+  "plugins": [
+    {
+      "name": "harness-doc",
+      "source": "./plugins/harness-doc",
+      "version": "0.1.0",
+      "description": "ドキュメント作成ハーネス（manual-writer スキル / doc-reviewer エージェント / check-docs フック）。プロジェクト側の docs-style/ と .claude/doc-harness.config.json を契約として動作する"
+    }
+  ]
+}

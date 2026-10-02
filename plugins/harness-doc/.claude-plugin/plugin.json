@@ -1,0 +1,18 @@
+{
+  "name": "harness-doc",
+  "version": "0.1.0",
+  "description": "ドキュメント作成ハーネス。読者プロファイルを差し替える manual-writer スキル、予備知識のない読者になりきる doc-reviewer エージェント、曖昧語・見出し・リンク切れを検査する check-docs フックを提供する",
+  "author": {
+    "name": "mizuta0711"
+  },
+  "homepage": "https://github.com/mizuta0711/claude-doc-harness",
+  "repository": "https://github.com/mizuta0711/claude-doc-harness",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "harness",
+    "documentation",
+    "technical-writing",
+    "manual"
+  ]
+}

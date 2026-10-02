@@ -1,0 +1,54 @@
+name: CI
+
+# 判定ロジックの検査と、同梱文書の自己検査。
+# 依存パッケージを入れない方針なので `npm ci` は無い。`node --test` だけを回す。
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # パス区切り・改行の扱いで壊れるのがこの層の典型的な事故なので両方で回す
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: node --test
+        run: node --test "tests/*.test.mjs"
+
+      - name: 同梱文書を check-docs で検査する
+        shell: bash
+        run: |
+          set -e
+          node plugins/harness-doc/hooks/scripts/check-docs.mjs \
+            README.md \
+            docs/guide/*.md docs/reference/*.md docs/background/*.md \
+            templates/base/CLAUDE.section.md \
+            plugins/harness-doc/skills/manual-writer/SKILL.md \
+            plugins/harness-doc/skills/manual-writer/profiles/*.md \
+            plugins/harness-doc/skills/manual-writer/templates/*.md \
+            plugins/harness-doc/skills/manual-writer/examples/good.md \
+            plugins/harness-doc/agents/doc-reviewer.md
+
+  validate:
+    # marketplace マニフェストの整合。`claude` が無い環境ではスキップする
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: claude plugin validate --strict
+        run: |
+          if command -v claude >/dev/null 2>&1; then
+            claude plugin validate . --strict
+          else
+            echo "claude が無いためスキップ（ローカルの repo-guard が push 前に検査する）"
+          fi
