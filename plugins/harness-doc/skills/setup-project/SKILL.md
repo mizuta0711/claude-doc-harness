@@ -1,6 +1,6 @@
 ---
 name: setup-project
-description: 今開いているプロジェクトに文書ハーネス（harness-doc）を対話で導入する。新規か既存かを見分け、既存なら今の文書の置き場所・文体・用語表・見た目（CSS）を読み取って踏襲する案を、新規なら見本の文から文体と見た目を選んでもらう。CLAUDE.md の文書ルールの節・docs-style/（用語集・曖昧語リスト・voice.md・使い方）・.claude/doc-harness.config.json と、文書群ごとの読者・扱わないことを残すブリーフ（.claude/rules/doc-brief-*.md）を置く。導入済みでブリーフの無いプロジェクトには、ブリーフだけを足す。claude-dev-harness 導入済みなら設計書・機能設計書・レビュー記録・引き継ぎを検査対象から外す。「このプロジェクトに文書ハーネスを入れて」「マニュアル作成の準備をして」の入口。manual-writer が設定不在を検出したときにも使う。
+description: 今開いているプロジェクトに文書ハーネス（harness-doc）を対話で導入する。新規か既存かを見分け、既存なら今の文書の置き場所・文体・用語表・見た目（CSS）を読み取って踏襲する案を、新規なら見本の文から文体と見た目を選んでもらう。CLAUDE.md の文書ルールの節・docs-style/（用語集・曖昧語リスト・voice.md・使い方）・.claude/doc-harness.config.json と、文書群ごとの読者・扱わないことを残すブリーフ（.claude/rules/doc-brief-*.md）を置く。導入済みのプロジェクトには、足りないもの（ブリーフ・内部の改訂記録・CLAUDE.md の節の最新版）だけを足す。claude-dev-harness 導入済みなら設計書・機能設計書・レビュー記録・引き継ぎを検査対象から外す。「このプロジェクトに文書ハーネスを入れて」「マニュアル作成の準備をして」の入口。manual-writer が設定不在を検出したときにも使う。
 argument-hint: "[導入先のパス（省略時は今のプロジェクト）]"
 allowed-tools: "Bash(node:*), Bash(ls:*), Bash(git status:*), Read, Glob, Grep, Edit, Write, AskUserQuestion"
 ---
@@ -44,7 +44,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 
 | 結果 | 次 |
 |---|---|
-| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無ければ（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list` で確かめる）、**「導入済みのプロジェクトにブリーフを足す」**（下の節）を行う。ブリーフがあり、文体を変えたいなら `change-tone`、読者や範囲を変えたいなら `change-policy` を案内して終える |
+| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** 次のどれかに当たれば、**「導入済みのプロジェクトに足す」**（下の節）を行う。(1) ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無い（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list`）。(2) `CLAUDE.md` の「文書ルール（harness-doc）」の節が最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）と違う。(3) ブリーフの文書群に、内部の改訂記録（`docs-style/history/<名前>.md`）が無い。どれにも当たらなければ、文体を変えたいなら `change-tone`、読者や範囲を変えたいなら `change-policy` を案内して終える |
 | `existing: true`（利用者向けの文書の候補がある） | Step 2A（既存） |
 | `existing: false` | Step 2B（新規） |
 
@@ -92,6 +92,8 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 - HTML の場所を選んだ場合、`cssFiles` から**その場所が読み込んでいる CSS**（HTML の `<link>` を見る）を特定し、
   `voice.md` の「従う CSS」に書く。**既存の見た目は変えないので、聞かない**
 - 図の描き方（スクリーンショット・CSS のモック・CSS の図部品）は実物から読み取って書く
+- **既存の文書に改訂履歴の節があれば、その見出しの名前を読み取る**（「更新履歴」「変更履歴」のように「改訂履歴」と違うなら、
+  config の `revisionHeadings` に書く。完了処理の検査がその名前で節を探す）。`apply.mjs --config '{"revisionHeadings":["更新履歴"]}'`
 
 ## Step 2B: 新規 — 見本から選んでもらう
 
@@ -129,17 +131,16 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 
 3. **依頼者が確かめた値は「確定」、推測のまま置いた値は「仮定」**で書く（Step 3）。仮定の値は、文書を書くときに `manual-writer` が確かめ直す
 
-## 導入済みのプロジェクトにブリーフを足す
+## 導入済みのプロジェクトに足す
 
-0.6.0 以前に導入したプロジェクトには、ブリーフが無い。**導入はやり直さず、ブリーフだけを足す。**
+0.6.0 以前に導入したプロジェクトには、ブリーフも内部の改訂記録も無く、`CLAUDE.md` の節も古い。**導入はやり直さず、足りないものだけを足す。**
 
 1. `.claude/doc-harness.config.json` の `include` と、その場所の文書を2〜3本読み、Step 2C の案を作る
-2. Step 2C の 2・3 と同じように確かめて、Step 3 の 3（ブリーフを書く）だけを行う
-3. `CLAUDE.md` の「文書ルール（harness-doc）」の節に、ブリーフの規則（規則8）が無ければ、同じ問いで「規則8 を足しますか（推奨）」と聞く。はいなら、次の文面を節の最後の規則の次に `Edit` で足す（雛形の `CLAUDE.section.md` の規則8 と同じ文面）
-
-   > 8. **誰が読むか・何を扱わないかは、文書群ごとのブリーフ（`.claude/rules/doc-brief-*.md`）に従う。** 一度決めた読者を毎回聞き直さない。
-   >    ブリーフは `.claude/` 配下なので `Edit` で書かず、harness-doc のスクリプト（`apply.mjs --brief`）で書く。
-   >    読者や扱う範囲を変えたいと頼まれたら `/harness-doc:change-policy` を使う
+2. `CLAUDE.md` の「文書ルール（harness-doc）」の節と、最新版の節（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）を比べる。
+   違えば、違う規則を1行ずつ挙げる（例:「規則1: 入口が manual-writer から plan-doc に変わった」「規則9: 改訂の記録が無い」）
+3. Step 2C の 2・3 と、上の節の置き換え（「最新版で置き換える（推奨）／置き換えない」）を、**まとめて1回で**確かめる
+4. Step 3 の 3（ブリーフを書く）と 4（内部の改訂記録を作る）を行う。置き換えると決めたら、`CLAUDE.md` の節（見出し「## 文書ルール（harness-doc）」から次の `## ` の前まで）を最新版で置き換える（`Edit`）。
+   **プロジェクトが節に足した独自の規則があれば、置き換えた後の節の末尾に残す**（消さない）
 
 ## Step 3: 適用する
 
@@ -173,7 +174,13 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
    推測のまま置く値は `{"value":"...","status":"仮定"}` の形で渡す。文書群の文体が `voice.md` と違うなら `"styleDiff":"..."` も渡す。
    書いたら `node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list` で確かめる
 
-4. 文書側を書き込む（`Edit`）
+4. 文書群ごとに、内部の改訂記録を雛形から作る（**必須**。改訂のたびに、改訂箇所・改訂内容・改訂意図を残す場所）
+
+   ```bash
+   node "${CLAUDE_SKILL_DIR}/../../scripts/history.mjs" init <文書群の名前> --dest "<導入先>"
+   ```
+
+5. 文書側を書き込む（`Edit`）
 
    | ファイル | 書くこと |
    |---|---|
@@ -215,4 +222,5 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 | 見た目 | 従う CSS、または選んだ方向性 |
 | 置いたもの / 触らなかったもの | `apply.mjs` の結果 |
 | 試しの検査 | Step 4 の結果（件数と内訳） |
-| 次にできること | 「〇〇の手順書を書いて」で `manual-writer`。テイストを変えたいときは「文書のテイストを変えて」で `change-tone` |
+| 内部の改訂記録 | 作った記録のファイル（文書群ごと） |
+| 次にできること | 「〇〇の手順書を書いて」「この文書のここを直して」で `plan-doc`（依頼の大きさで工程を分ける）。テイストを変えたいときは「文書のテイストを変えて」。読者や扱う範囲を変えたいときは「対象読者を〇〇に変えたい」 |

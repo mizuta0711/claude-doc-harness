@@ -115,12 +115,16 @@ test("欠け: 必須の項目が無ければ挙げ、「仮定」の項目は確
   const dir = tmp();
   writeBrief(dir, { name: "g", title: "t", paths: ["docs/**"], by: "書き手", set: { 読者: { プロファイル: "operator", 読む状況: "障害時" } } });
   const [b] = loadBriefs(dir);
-  const { missing, assumed } = missingItems(b, "a.md");
+  const { missing, assumed, draft } = missingItems(b, "a.md");
   assert.ok(missing.includes("読者 / 読者像"));
   assert.ok(missing.includes("事実の承認者 / 承認者"));
   assert.ok(missing.some((m) => m.startsWith("扱わないこと")));
-  assert.ok(missing.includes("文書ごとの決め事（a.md） / ゴール"));
-  assert.ok(!missing.some((m) => m.includes("受け入れ基準")), "受け入れ基準は P2a まで必須にしない");
+  assert.ok(!missing.some((m) => m.includes("文書ごとの決め事")), "文書ごとの項目は聞く側に入れない");
+  assert.deepEqual(draft, [
+    "文書ごとの決め事（a.md） / ゴール",
+    "文書ごとの決め事（a.md） / 文書の種類",
+    "文書ごとの決め事（a.md） / 受け入れ基準",
+  ]);
   assert.deepEqual(assumed, ["読者 / プロファイル: operator", "読者 / 読む状況: 障害時"]);
 });
 

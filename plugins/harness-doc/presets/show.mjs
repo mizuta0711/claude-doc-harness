@@ -6,6 +6,7 @@
  *   node show.mjs visuals             見た目の方向性
  *   node show.mjs profile <名前>      読者プロファイル（beginner / operator / developer）
  *   node show.mjs reference <名前>    知見のまとめ（structure / writing / japanese / web / accessibility）
+ *   node show.mjs claude-section     プロジェクトの CLAUDE.md に置く「文書ルール（harness-doc）」の節の最新版
  *
  * なぜスクリプトか: プラグインはプロジェクトの外（~/.claude/plugins/ のキャッシュ）に置かれる。
  * Read ツールでそこを読むと、権限の確認が出たり拒否されたりする（非対話の試験で実際に拒否された）。
@@ -19,6 +20,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(here, "..");
 
 export function resolveDoc(kind, name) {
+  if (kind === "claude-section") return path.join(pluginRoot, "scaffold", "CLAUDE.section.md");
   if (kind === "voices") return path.join(here, "voices.md");
   if (kind === "visuals") return path.join(here, "visuals.md");
   if (kind === "profile" || kind === "reference") {
@@ -38,7 +40,9 @@ function main() {
         .readdirSync(path.join(pluginRoot, "skills", "manual-writer", d))
         .map((f) => f.replace(/\.md$/, ""))
         .join("|");
-    process.stderr.write(`usage: node show.mjs voices | visuals | profile <${list("profiles")}> | reference <${list("references")}>\n`);
+    process.stderr.write(
+      `usage: node show.mjs voices | visuals | claude-section | profile <${list("profiles")}> | reference <${list("references")}>\n`
+    );
     process.exit(1);
   }
   process.stdout.write(fs.readFileSync(file, "utf-8"));

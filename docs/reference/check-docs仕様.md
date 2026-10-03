@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 対応ハーネス版 | harness-doc 0.7.0 |
+| 対応ハーネス版 | harness-doc 0.8.0 |
 | 実装 | `plugins/harness-doc/hooks/scripts/check-docs.mjs` |
 | 検査 | `tests/check-docs.test.mjs`・`tests/check-docs-html.test.mjs` |
 
@@ -137,6 +137,7 @@ HTML では、バッククォートはただの文字でインラインコード
 | `linters.markdownlint` | boolean | true | `false` で実行しない |
 | `linters.textlint` | boolean | true | `false` で実行しない |
 | `glossaryFiles` | string[] | `[]` | プロジェクトが既に持つ用語表（プロジェクトルートからの相対パス）。`docs-style/glossary.md` に加えて読む |
+| `historyDir` | string | `"docs-style/history"` | 内部の改訂記録の置き場所（`scripts/history.mjs`・`scripts/complete-doc.mjs` が読む）。`styleDir` の下に置けば、このフックの検査対象から外れる。公開リポジトリで改訂意図を出したくない場合は、リポジトリの外に置くことはできない（git の差分で記録を確かめるため）ので、公開しない別のリポジトリで文書を管理する |
 | `voice.endings` | string | null | `null` | `keitai`（です・ます）/ `jotai`（だ・である）/ `null`（検査しない）。`setup-project` と `change-tone` が `docs-style/voice.md` と揃えて書く。**文書群ごとに文末が違う**（ブリーフの「文体の差分」で一部の文書群だけ文末を変えた）ときは `null` にする（この検査はプロジェクト全体に一律で効くため） |
 | `rules.imageAlt` / `rules.headingSkip` / `rules.linkText` / `rules.htmlLang` | boolean | すべて `true` | 検査 8 を個別に止める。見出しの飛びを意図して使っているプロジェクトは `headingSkip` を `false` にする |
 | `rules.anchors` | boolean | `true` | 検査 5-2（アンカー切れ）を止める。見出しからアンカーを作る規則が GitHub と違う描画（MkDocs・Docusaurus のような静的サイト生成で、設定によって違う）を使う場合は `false` にする |

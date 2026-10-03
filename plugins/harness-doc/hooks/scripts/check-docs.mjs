@@ -49,6 +49,10 @@ export const DEFAULT_CONFIG = {
   linters: { markdownlint: true, textlint: true },
   /** プロジェクトが既に持つ用語表（プロジェクトルートからの相対パス）。docs-style/glossary.md に加えて読む */
   glossaryFiles: [],
+  /** 内部の改訂記録の置き場所（scripts/history.mjs）。styleDir の下なので検査の対象外 */
+  historyDir: "docs-style/history",
+  /** 読者向けの改訂履歴の節の見出し（scripts/complete-doc.mjs が探す）。既存のサイトが「更新履歴」なら setup-project が合わせる */
+  revisionHeadings: ["改訂履歴"],
   /** 文体。endings: "keitai"（です・ます）/ "jotai"（だ・である）/ null（検査しない） */
   voice: { endings: null },
   /** 構造とアクセシビリティの検査（structure-checks.mjs）。false で個別に止められる */

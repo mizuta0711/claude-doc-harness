@@ -48,8 +48,8 @@ const REQUIRED_GROUP = [
   ["事実の承認者", "承認者"],
   ["読者向けの改訂履歴", "読者向けの改訂履歴"],
 ];
-// 受け入れ基準は、読者役が判定に使うようになる版（改善計画の P2a）から必須にする。それまでは任意
-const REQUIRED_DOC = ["ゴール", "文書の種類"];
+// 文書ごとの項目は、聞かずに書き手が案を作り、目次案と一緒に確かめる（問いを1回増やさない）。missing は draft に分けて出す
+const REQUIRED_DOC = ["ゴール", "文書の種類", "受け入れ基準"];
 
 // ---------------------------------------------------------------------------
 // 読む
@@ -406,15 +406,16 @@ export function missingItems(brief, docKey) {
   }
   if (!brief.outOfScope.length) missing.push("扱わないこと（無ければ「なし」と書く）");
   const doc = brief.docs[docKey] || {};
+  const draft = [];
   for (const key of REQUIRED_DOC) {
     const v = doc[key];
-    if (!v || !v.value) missing.push(`文書ごとの決め事（${docKey}） / ${key}`);
+    if (!v || !v.value) draft.push(`文書ごとの決め事（${docKey}） / ${key}`);
     else if (v.status === "仮定") assumed.push(`文書ごとの決め事（${docKey}） / ${key}: ${v.value}`);
   }
   for (const [key, v] of Object.entries(doc)) {
     if (!REQUIRED_DOC.includes(key) && v.status === "仮定") assumed.push(`文書ごとの決め事（${docKey}） / ${key}: ${v.value}`);
   }
-  return { missing, assumed };
+  return { missing, assumed, draft };
 }
 
 /** show の出力。文書群の節と、その文書の決め事だけを出す（ほかの文書の決め事は出さない） */
@@ -471,12 +472,14 @@ function main() {
     say(renderForDoc(r.brief, r.docKey));
     return;
   }
-  const { missing, assumed } = missingItems(r.brief, r.docKey);
+  const { missing, assumed, draft } = missingItems(r.brief, r.docKey);
   say(`文書: ${rel}（ブリーフ: ${r.brief.name}・文書ごとの見出し「${r.docKey}」）`);
   say(missing.length ? "欠けている項目（聞く）:" : "欠けている項目: なし");
   for (const m of missing) say(`  - ${m}`);
   say(assumed.length ? "「仮定」の項目（確かめる）:" : "「仮定」の項目: なし");
   for (const a of assumed) say(`  - ${a}`);
+  say(draft.length ? "書き手が案を作る項目（聞かずに案を作り、目次案と一緒に確かめる）:" : "書き手が案を作る項目: なし");
+  for (const d of draft) say(`  - ${d}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
