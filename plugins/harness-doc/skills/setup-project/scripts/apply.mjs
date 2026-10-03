@@ -5,6 +5,10 @@
  *
  *   node apply.mjs [--dest <project-dir>] [--dry-run] [--json]
  *   node apply.mjs [--dest <project-dir>] --config <json>    既存の config に値を書き込む（include・glossaryFiles・voice ほか）
+ *   node apply.mjs [--dest <project-dir>] --brief <json>     ブリーフ（.claude/rules/doc-brief-<name>.md）に値を書き込む。無ければ作る
+ *   node apply.mjs [--dest <project-dir>] --brief-file <path> 同じ。JSON をファイルから読む（シェルの引用で JSON が崩れる環境向け）
+ *
+ * --brief の JSON の形は scripts/brief.mjs の writeBrief を見る。由来の列（日付と、依頼者か書き手か）はスクリプトが埋める。
  *
  * --config は、スキルが利用者と決めた値を `.claude/doc-harness.config.json` に書き込むためにある。
  * `.claude/` 配下は Claude Code が書き込みに確認を求める場所なので、Edit ではなくこのスクリプトで書く。
@@ -26,6 +30,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeBrief, RULES_DIR, BRIEF_PREFIX } from "../../../scripts/brief.mjs";
 
 const NL = "\n";
 const SECTION_HEADING = "## 文書ルール（harness-doc）";
@@ -57,7 +62,7 @@ export function configFor(templateText, devHarness) {
 }
 
 export function parseArgs(argv) {
-  const out = { dest: null, dryRun: false, json: false, config: null };
+  const out = { dest: null, dryRun: false, json: false, config: null, brief: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dest") out.dest = argv[++i];
@@ -65,6 +70,8 @@ export function parseArgs(argv) {
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--json") out.json = true;
     else if (a === "--config") out.config = argv[++i];
+    else if (a === "--brief") out.brief = argv[++i];
+    else if (a === "--brief-file") out.brief = fs.readFileSync(argv[++i], "utf-8");
     else if (a === "-h" || a === "--help") out.help = true;
     else throw new Error(`不明な引数: ${a}`);
   }
@@ -156,6 +163,31 @@ function main() {
   if (!fs.existsSync(dest)) {
     process.stderr.write(`dest が存在しません: ${dest}` + NL);
     process.exit(1);
+  }
+  if (args.brief !== null) {
+    let input;
+    try {
+      input = JSON.parse(args.brief);
+    } catch (e) {
+      process.stderr.write(`--brief の JSON が読めない: ${e.message}` + NL);
+      process.exit(1);
+    }
+    if (args.dryRun) {
+      say(`--dry-run: ${RULES_DIR}/${BRIEF_PREFIX}${input.name}.md に書き込む内容を確かめるだけ（書き込まない）`);
+      say(JSON.stringify(input, null, 2));
+      return;
+    }
+    let result;
+    try {
+      result = writeBrief(dest, input);
+    } catch (e) {
+      process.stderr.write(`ブリーフに書けない: ${e.message}` + NL);
+      process.exit(1);
+    }
+    say(`書き込んだ: ${path.relative(dest, result.file).split(path.sep).join("/")}`);
+    for (const w of result.warnings) say(`警告: ${w}`);
+    say(fs.readFileSync(result.file, "utf-8"));
+    return;
   }
   if (args.config !== null) {
     const file = path.join(dest, CONFIG_REL);

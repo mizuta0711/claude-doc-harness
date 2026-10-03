@@ -703,6 +703,7 @@ export function checkFile(absPath, dir, config, style) {
   if (rel.startsWith("../") || path.isAbsolute(rel)) return null;
   const styleRel = toPosix(config.styleDir || "docs-style") + "/";
   if (rel.startsWith(styleRel)) return null;
+  if (rel.startsWith(".claude/")) return null; // ブリーフ（.claude/rules/doc-brief-*.md）や設定は文書ではない
   if (!matchesAny(rel, config.include)) return null;
   if (matchesAny(rel, config.exclude)) return null;
   if (!fs.existsSync(absPath)) return null;

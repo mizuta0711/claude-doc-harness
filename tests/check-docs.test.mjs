@@ -209,6 +209,8 @@ test("checkFile: include / exclude / styleDir / 拡張子で対象を絞る", ()
   assert.equal(checkFile(mk("src/a.md"), dir, config, style), null, "include 外");
   assert.equal(checkFile(mk("docs-style/glossary.md"), dir, config, style), null, "styleDir");
   assert.equal(checkFile(mk("docs/a.txt"), dir, config, style), null, "拡張子");
+  const wide = { ...config, include: ["**/*.md"] };
+  assert.equal(checkFile(mk(".claude/rules/doc-brief-usage.md"), dir, wide, style), null, "ブリーフは include が広くても検査しない");
 });
 
 // ---------------------------------------------------------------------------
