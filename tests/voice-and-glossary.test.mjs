@@ -79,6 +79,20 @@ test("文末: 敬体の設定では常体の文末を止め、「」の中と体
   );
 });
 
+test("文末: 敬体の過去形（ました。でした。）は常体と誤判定しない", () => {
+  const voice = { endings: "keitai" };
+  const lines = [
+    { no: 1, text: "保存しました。" },
+    { no: 2, text: "設定は空でした。" },
+    { no: 3, text: "設定を保存した。" },
+    { no: 4, text: "画面が開いた。" },
+  ];
+  assert.deepEqual(
+    checkEndings(lines, voice).map((i) => i.line),
+    [3, 4]
+  );
+});
+
 test("文末: 常体の設定では敬体の文末を止める。設定が無ければ何もしない", () => {
   const lines = [
     { no: 1, text: "設定を保存する。" },

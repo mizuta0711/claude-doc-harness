@@ -52,7 +52,7 @@ export const DEFAULT_CONFIG = {
   /** 文体。endings: "keitai"（です・ます）/ "jotai"（だ・である）/ null（検査しない） */
   voice: { endings: null },
   /** 構造とアクセシビリティの検査（structure-checks.mjs）。false で個別に止められる */
-  rules: { imageAlt: true, headingSkip: true, linkText: true, htmlLang: true },
+  rules: { imageAlt: true, headingSkip: true, linkText: true, htmlLang: true, anchors: true },
 };
 
 // ---------------------------------------------------------------------------
@@ -230,7 +230,8 @@ export function parseGlossary(text) {
  * 「」『』の中（画面の文言の引用）は見ない。句点「。」で終わる文だけを見る（体言止め・箇条書きは対象外）。
  */
 const ENDING_RULES = {
-  keitai: { re: /(である|のだ|だ|ではない|ない|た|る)。/, label: "常体", want: "敬体（です・ます）" },
+  // 「た。」は「ました。」「でした。」（敬体の過去形）を除く
+  keitai: { re: /(である|のだ|だ|ではない|ない|(?<!まし|でし)た|る)。/, label: "常体", want: "敬体（です・ます）" },
   jotai: { re: /(です|ます|ました|でした|ません|ください|ましょう)。/, label: "敬体", want: "常体（だ・である）" },
 };
 
@@ -410,6 +411,106 @@ function brokenLinkIssue(target, baseDir, lineNo) {
 }
 
 // ---------------------------------------------------------------------------
+// アンカー（`#` 以降）
+// ---------------------------------------------------------------------------
+
+/**
+ * 見出しの文言からアンカーを作る（GitHub と同じ作り方）。
+ * 小文字にし、文字・数字・結合文字・連結記号（_）・空白・ハイフン以外を除き、空白をハイフンにする。
+ * 静的サイト生成など別の作り方をする描画では合わないことがある。そのときは config の rules.anchors を false にする。
+ */
+export function slugGithub(text) {
+  return String(text)
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]*>/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "")
+    .replace(/ /g, "-");
+}
+
+const HTML_ID_ATTR = /\b(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+
+function idsInHtml(text) {
+  const ids = new Set();
+  const s = String(text).replace(HTML_COMMENT, "");
+  let m;
+  HTML_ID_ATTR.lastIndex = 0;
+  while ((m = HTML_ID_ATTR.exec(s)) !== null) ids.add(m[1] ?? m[2]);
+  return ids;
+}
+
+/** 文書が持つアンカーの集合。Markdown は見出し（重複は -1, -2 を付ける）と、本文中の HTML の id / name */
+export function anchorsOf(text, isHtml) {
+  if (isHtml) return idsInHtml(text);
+  const ids = idsInHtml(text.replace(/```[\s\S]*?```/g, ""));
+  const seen = new Map();
+  for (const l of tokenizeLines(text).lines) {
+    if (l.inCode) continue;
+    const m = l.text.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
+    if (!m) continue;
+    let heading = m[1];
+    const explicit = heading.match(/\s*\{#([^}\s]+)\}\s*$/);
+    if (explicit) {
+      ids.add(explicit[1]);
+      heading = heading.slice(0, explicit.index);
+    }
+    const base = slugGithub(heading);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    ids.add(n === 0 ? base : `${base}-${n}`);
+  }
+  return ids;
+}
+
+const anchorCache = new Map();
+
+/**
+ * リンクの `#` 以降が、行き先の文書に実在するかを見る。
+ * 見るのは、この文書から出ていくリンクだけ（同じ文書内の `#...` と、相対パスの .md / .html）。
+ * 行き先の見出しを変えたときに、外から入ってくるリンクが切れるのは、このフックでは見つけられない。
+ */
+function brokenAnchorIssue(target, baseDir, lineNo, self, config) {
+  if (config?.rules?.anchors === false) return null;
+  if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) return null;
+  if (/\$\{|\{\{/.test(target)) return null;
+  const hash = target.indexOf("#");
+  if (hash < 0) return null;
+  let frag = target.slice(hash + 1);
+  if (!frag || frag === "top") return null;
+  try {
+    frag = decodeURIComponent(frag);
+  } catch {
+    /* そのまま */
+  }
+  const filePart = target.slice(0, hash).split("?")[0];
+  let anchors;
+  if (!filePart) {
+    anchors = anchorsOf(self.text, self.isHtml);
+  } else {
+    let decoded = filePart;
+    try {
+      decoded = decodeURI(filePart);
+    } catch {
+      /* そのまま */
+    }
+    const resolved = path.resolve(baseDir, decoded);
+    const isHtml = isHtmlPath(resolved);
+    if (!isHtml && !/\.md$/i.test(resolved)) return null;
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null; // ファイルの有無はリンク切れの検査が見る
+    if (!anchorCache.has(resolved)) anchorCache.set(resolved, anchorsOf(fs.readFileSync(resolved, "utf-8"), isHtml));
+    anchors = anchorCache.get(resolved);
+  }
+  if (anchors.has(frag) || anchors.has(frag.toLowerCase())) return null;
+  return {
+    line: lineNo,
+    kind: "link",
+    message: `アンカー切れ: ${target}（行き先に「#${frag}」に当たる見出しや id が無い。見出しの文言を変えていないか確かめる。描画の作り方が GitHub と違うなら config の rules.anchors を false に）`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // HTML
 // ---------------------------------------------------------------------------
 
@@ -491,7 +592,13 @@ function checkHtml(text, { filePath, config, style }) {
     while ((m = aRe.exec(linkSource)) !== null) {
       const lineNo = linkSource.slice(0, m.index).split("\n").length;
       if (lineIgnored(rawLines[lineNo - 1] || "")) continue;
-      const issue = brokenLinkIssue(decodeEntities((m[1] ?? m[2] ?? "").trim()), baseDir, lineNo);
+      const target = decodeEntities((m[1] ?? m[2] ?? "").trim());
+      // アンカーは <a> と <area> の href だけを見る。SVG の <use href="#icon"> は実行時に差し込む定義への参照で、文書の見出しではない
+      const tag = (linkSource.slice(linkSource.lastIndexOf("<", m.index), m.index).match(/^<([a-z0-9-]+)/i) || [])[1];
+      const isNavLink = /^(a|area)$/i.test(tag || "") && /^href/i.test(m[0]);
+      const issue =
+        brokenLinkIssue(target, baseDir, lineNo) ??
+        (isNavLink ? brokenAnchorIssue(target, baseDir, lineNo, { text: raw, isHtml: true }, config) : null);
       if (issue) issues.push(issue);
     }
   }
@@ -541,7 +648,9 @@ function checkMarkdown(text, { filePath, config, style }) {
       const t = stripInlineCode(l.text);
       let m;
       while ((m = linkRe.exec(t)) !== null) {
-        const issue = brokenLinkIssue(m[1], baseDir, l.no);
+        const issue =
+          brokenLinkIssue(m[1], baseDir, l.no) ??
+          brokenAnchorIssue(m[1], baseDir, l.no, { text, isHtml: false }, config);
         if (issue) issues.push(issue);
       }
     }

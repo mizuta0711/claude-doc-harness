@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 対応ハーネス版 | harness-doc 0.5.0 |
+| 対応ハーネス版 | harness-doc 0.6.0 |
 | 実装 | `plugins/harness-doc/hooks/scripts/check-docs.mjs` |
 | 検査 | `tests/check-docs.test.mjs`・`tests/check-docs-html.test.mjs` |
 
@@ -78,9 +78,10 @@ glob は `**`（階層をまたぐ）・`*`（またがない）・`?` だけを
 | 2 | 曖昧語 | `docs-style/banned-words.txt` | 本文の行に含まれる。Markdown はコードブロック内・インラインコード内・`<!--` で始まる行を除く。HTML は下の「HTML の本文」を見る |
 | 3 | コードブロックの言語指定 | — | 開きフェンス（```` ``` ```` または `~~~`）の直後が空 |
 | 4 | 用語集の表記ゆれ | `docs-style/glossary.md` と `glossaryFiles` の表の「禁止」列（下の「用語表の読み方」） | 散文に含まれる。禁止表記が推奨表記の先頭部分で、その位置が推奨表記として読めるなら検出しない（`サーバ` / `サーバー`） |
-| 5 | リンク切れ | — | `[text](path)` の相対パス。`http:` 等のスキーム付きと `#` 始まりは見ない。`#` 以降は落として解決する |
+| 5 | リンク切れ | — | `[text](path)` の相対パス。`http:` 等のスキーム付きは見ない。`#` 以降は落としてファイルを解決する |
+| 5-2 | アンカー切れ | `rules.anchors` | `#` 以降が行き先に実在するか。同じ文書内の `#...` と、相対パスの `.md`・`.html` への `path#...` を見る。Markdown の見出しは GitHub と同じ作り方でアンカーにする（小文字にし、文字・数字・`_`・空白・`-` 以外を除き、空白を `-` にする。同じ見出しは `-1`・`-2` を付ける）。見出し末尾の `{#id}` と、本文中の HTML の `id`・`name` 属性も認める。`#top` は見ない。**見るのは、書いた文書から出ていくリンクだけ**（見出しを変えたときに、ほかの文書から入ってくるリンクが切れるのは、このフックでは見つけられない） |
 | 6 | markdownlint / textlint | `node_modules/.bin/` に実行ファイルがある場合だけ | 非ゼロ終了なら出力を指摘に含める。20秒でタイムアウト |
-| 7 | 文末の混在 | `voice.endings` | `keitai` なら常体の文末（`る。`・`た。`・`だ。`・`ない。`・`である。`）、`jotai` なら敬体の文末（`です。`・`ます。`・`ください。` ほか）を止める。句点で終わる文だけを見る。「」『』の中（画面の文言の引用）は見ない。`null` なら検査しない |
+| 7 | 文末の混在 | `voice.endings` | `keitai` なら常体の文末（`る。`・`た。`・`だ。`・`ない。`・`である。`）、`jotai` なら敬体の文末（`です。`・`ます。`・`ください。` ほか）を止める。`keitai` のとき、敬体の過去形（`ました。`・`でした。`）は `た。` に当たっても止めない（0.6.0 で直した誤判定）。句点で終わる文だけを見る。「」『』の中（画面の文言の引用）は見ない。`null` なら検査しない |
 | 8 | 構造とアクセシビリティ | `rules` | 画像の代替テキスト（Markdown は `![](...)` の空、HTML は `alt` 属性の無い `img`。`alt=""` は飾りとして認める。WCAG 2.2 1.1.1）、見出しレベルの飛び（h2 の次に h4。WCAG の不適合ではなく W3C G141 の推奨）、行き先の分からないリンク文言（「こちら」「ここ」「詳しくはこちら」「click here」だけ。完全一致。WCAG 2.2 2.4.4）、`lang` の無い `html` 要素（WCAG 2.2 3.1.1）。実装は `structure-checks.mjs` |
 
 `docs-style/` のファイルが無ければ、その検査だけ飛ばす。
@@ -95,6 +96,7 @@ HTML（`.html`・`.htm`）は、本文のテキストだけを取り出して検
 | 読まない（中身ごと） | コメント、`script`・`style`・`pre`・`code`・`kbd`・`samp`・`template`・`svg` 要素 |
 | 読まない | 属性値（`alt`・`title` を含む） |
 | リンク切れの対象 | `href`・`src` 属性の相対パス。`?` 以降と `#` 以降は落として解決する。コメントと `script`・`style` の中は見ない |
+| アンカー切れの対象 | `<a>`・`<area>` の `href` だけ。SVG の `<use href="#icon">` は、実行時に差し込む定義への参照なので見ない |
 | 検査しない | コードブロックの言語指定（Markdown の規約で、HTML には当たる規約が無い）、markdownlint / textlint |
 | 必須見出し | `h1`〜`h6` の中身（入れ子のタグを除いたテキスト） |
 
@@ -136,6 +138,7 @@ HTML では、バッククォートはただの文字でインラインコード
 | `glossaryFiles` | string[] | `[]` | プロジェクトが既に持つ用語表（プロジェクトルートからの相対パス）。`docs-style/glossary.md` に加えて読む |
 | `voice.endings` | string | null | `null` | `keitai`（です・ます）/ `jotai`（だ・である）/ `null`（検査しない）。`setup-project` と `change-tone` が `docs-style/voice.md` と揃えて書く |
 | `rules.imageAlt` / `rules.headingSkip` / `rules.linkText` / `rules.htmlLang` | boolean | すべて `true` | 検査 8 を個別に止める。見出しの飛びを意図して使っているプロジェクトは `headingSkip` を `false` にする |
+| `rules.anchors` | boolean | `true` | 検査 5-2（アンカー切れ）を止める。見出しからアンカーを作る規則が GitHub と違う描画（MkDocs・Docusaurus のような静的サイト生成で、設定によって違う）を使う場合は `false` にする |
 
 既定値はスクリプト内の `DEFAULT_CONFIG` と `DEFAULT_REQUIRED_HEADINGS` にある。
 設定ファイルの値は既定値に**上書き**される（`requiredHeadings` はキー単位で合成）。

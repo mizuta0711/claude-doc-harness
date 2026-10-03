@@ -134,15 +134,56 @@ test("必須見出し: doc-type がある文書だけ検査し、見出しに語
   assert.deepEqual(kinds(untyped), []);
 });
 
-test("リンク切れ: 相対パスだけを見て、外部 URL とアンカーは無視する", () => {
+test("リンク切れ: 相対パスだけを見て、外部 URL は無視する", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-docs-"));
   const doc = path.join(dir, "a.md");
-  fs.writeFileSync(path.join(dir, "exists.md"), "# e\n");
+  fs.writeFileSync(path.join(dir, "exists.md"), "# e\n\n## sec\n");
   const text =
-    "# t\n\n[ok](exists.md) [ok2](./exists.md#sec) [web](https://example.com/x.md) [anchor](#top) [ng](missing.md)\n";
+    "# t\n\n[ok](exists.md) [ok2](./exists.md#sec) [web](https://example.com/x.md#nope) [anchor](#top) [ng](missing.md#sec)\n";
   const issues = checkDocument(text, { filePath: doc, config: DEFAULT_CONFIG, style });
   assert.deepEqual(kinds(issues), ["link"]);
-  assert.match(issues[0].message, /missing\.md/);
+  assert.match(issues[0].message, /リンク切れ: missing\.md/);
+});
+
+test("アンカー: 行き先の見出しが無ければ止める（Markdown・同じ文書内・HTML の id）", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-docs-"));
+  const doc = path.join(dir, "a.md");
+  fs.writeFileSync(
+    path.join(dir, "b.md"),
+    "# B\n\n## 設定する\n\n## Step 1: 準備 `config.json`\n\n## 設定する\n\n```bash\n# コメント見出しではない\n```\n"
+  );
+  fs.writeFileSync(path.join(dir, "c.html"), '<html lang="ja"><body><h2 id="font">文字</h2><a name="old"></a></body></html>');
+  const text = [
+    "# t",
+    "",
+    "## 自分の節",
+    "",
+    "[1](b.md#設定する) [2](b.md#設定する-1) [3](b.md#step-1-準備-configjson) [4](b.md#%E8%A8%AD%E5%AE%9A%E3%81%99%E3%82%8B)",
+    "[5](c.html#font) [6](c.html#old) [7](#自分の節)",
+    "[ng1](b.md#設定します) [ng2](c.html#size) [ng3](#無い節) [ng4](b.md#コメント見出しではない)",
+    "",
+  ].join("\n");
+  const issues = checkDocument(text, { filePath: doc, config: DEFAULT_CONFIG, style });
+  assert.deepEqual(
+    issues.map((i) => i.message.match(/^アンカー切れ: ([^\s（]+)/)?.[1]),
+    ["b.md#設定します", "c.html#size", "#無い節", "b.md#コメント見出しではない"]
+  );
+  const off = { ...DEFAULT_CONFIG, rules: { ...DEFAULT_CONFIG.rules, anchors: false } };
+  assert.deepEqual(kinds(checkDocument(text, { filePath: doc, config: off, style })), []);
+});
+
+test("アンカー: HTML から出ていくリンクも見る", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-docs-"));
+  const doc = path.join(dir, "a.html");
+  fs.writeFileSync(path.join(dir, "b.html"), '<html lang="ja"><body><h2 id="font">文字</h2></body></html>');
+  const html =
+    '<html lang="ja"><body><h1 id="top-title">t</h1><p><a href="b.html#font">文字の設定</a> <a href="b.html#size">大きさの設定</a> <a href="#top-title">先頭へ</a></p>' +
+    '<svg class="mi" aria-hidden="true"><use href="#i-call"></use></svg></body></html>';
+  const issues = checkDocument(html, { filePath: doc, config: DEFAULT_CONFIG, style, format: "html" });
+  assert.deepEqual(
+    issues.filter((i) => i.kind === "link").map((i) => i.message.match(/^アンカー切れ: ([^\s（]+)/)?.[1]),
+    ["b.html#size"]
+  );
 });
 
 test("skip マーカー: 冒頭にあれば全検査を飛ばす", () => {
