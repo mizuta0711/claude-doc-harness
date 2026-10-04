@@ -143,7 +143,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 1. `.claude/doc-harness.config.json` の `include` と、その場所の文書を2〜3本読み、Step 2C の案を作る
 2. `CLAUDE.md` の「文書ルール（harness-doc）」の節と、最新版の節（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）を比べる。
    違えば、違う規則を1行ずつ挙げる（例:「規則1: 入口が manual-writer から plan-doc に変わった」「規則9: 改訂の記録が無い」）
-3. Step 2C の 2・3 と、上の節の置き換え（「最新版で置き換える（推奨）／置き換えない」）を、**まとめて1回で**確かめる
+   `docs-style/README.md`（利用者向けの使い方）も、最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" style-readme`）と比べる。違えば、違う行を挙げる（例:「行単位の抑止を使ってよい場合が増えた」）
+3. Step 2C の 2・3 と、上の節と `docs-style/README.md` の置き換え（「最新版で置き換える（推奨）／置き換えない」）を、**まとめて1回で**確かめる。
+   `docs-style/README.md` は、プロジェクトが書き足した行があれば、置き換えた後の末尾に残す
 4. Step 3 の 3（ブリーフを書く）と 4（内部の改訂記録を作る）を行う。置き換えると決めたら、`CLAUDE.md` の節（見出し「## 文書ルール（harness-doc）」から次の `## ` の前まで）を最新版で置き換える（`Edit`）。
    **プロジェクトが節に足した独自の規則があれば、置き換えた後の節の末尾に残す**（消さない）
 

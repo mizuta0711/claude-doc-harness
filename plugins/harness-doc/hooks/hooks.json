@@ -12,6 +12,29 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/commit-check.mjs\"",
+            "timeout": 60,
+            "statusMessage": "文書の改訂の記録を確認中（コミット時）..."
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/reviewer-guard.mjs\"",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

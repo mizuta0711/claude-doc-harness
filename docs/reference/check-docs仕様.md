@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 対応ハーネス版 | harness-doc 0.8.0 |
+| 対応ハーネス版 | harness-doc 0.10.0 |
 | 実装 | `plugins/harness-doc/hooks/scripts/check-docs.mjs` |
 | 検査 | `tests/check-docs.test.mjs`・`tests/check-docs-html.test.mjs` |
 
@@ -138,6 +138,9 @@ HTML では、バッククォートはただの文字でインラインコード
 | `linters.textlint` | boolean | true | `false` で実行しない |
 | `glossaryFiles` | string[] | `[]` | プロジェクトが既に持つ用語表（プロジェクトルートからの相対パス）。`docs-style/glossary.md` に加えて読む |
 | `historyDir` | string | `"docs-style/history"` | 内部の改訂記録の置き場所（`scripts/history.mjs`・`scripts/complete-doc.mjs` が読む）。`styleDir` の下に置けば、このフックの検査対象から外れる。公開リポジトリで改訂意図を出したくない場合は、リポジトリの外に置くことはできない（git の差分で記録を確かめるため）ので、公開しない別のリポジトリで文書を管理する |
+| `revisionHeadings` | string[] | `["改訂履歴"]` | 読者向けの改訂履歴の節の見出し（`scripts/complete-doc.mjs` が探す）。既存のサイトが「更新履歴」なら `setup-project` が合わせる |
+| `plansDir` | string | `"docs-style/plans"` | 改訂設計書の置き場所（`plan-doc` が規模 M・L で作る。完了したら `<plansDir>/completed/` に移す）。`styleDir` の下に置けば、このフックの検査対象から外れる |
+| `completeCheck` | string | `"block"` | コミット時の検査（`hooks/scripts/commit-check.mjs`）。`"block"`（改訂の記録が無い文書を含むコミットを止める）/ `"warn"`（警告だけ）/ `"off"`（何もしない）。ブリーフが1つも無いプロジェクトは、`"block"` でも警告だけになる |
 | `voice.endings` | string | null | `null` | `keitai`（です・ます）/ `jotai`（だ・である）/ `null`（検査しない）。`setup-project` と `change-tone` が `docs-style/voice.md` と揃えて書く。**文書群ごとに文末が違う**（ブリーフの「文体の差分」で一部の文書群だけ文末を変えた）ときは `null` にする（この検査はプロジェクト全体に一律で効くため） |
 | `rules.imageAlt` / `rules.headingSkip` / `rules.linkText` / `rules.htmlLang` | boolean | すべて `true` | 検査 8 を個別に止める。見出しの飛びを意図して使っているプロジェクトは `headingSkip` を `false` にする |
 | `rules.anchors` | boolean | `true` | 検査 5-2（アンカー切れ）を止める。見出しからアンカーを作る規則が GitHub と違う描画（MkDocs・Docusaurus のような静的サイト生成で、設定によって違う）を使う場合は `false` にする |
@@ -148,8 +151,8 @@ HTML では、バッククォートはただの文字でインラインコード
 ## 制約
 
 - PostToolUse はツール実行後に走るため、**書き込みそのものは止められない**。差し戻して直させる方式
-- Bash のヒアドキュメントで書いた文書は検査しない（Write / Edit だけが対象）。CLI で手動検査する
-- 曖昧語と用語集は**部分一致**。`など` が `などころ`に当たるような誤検出は、行末の `ignore` で逃がす
+- Bash のヒアドキュメントで書いた文書は検査しない（Write / Edit だけが対象）。CLI で手動検査する。完了処理の検査（`scripts/complete-doc.mjs`）は、作業前より指摘が増えた文書を NG にするので、そこでも捕まる
+- 曖昧語と用語集は**部分一致**。曖昧語がボタン名のような別の語の一部に当たる誤検出は、行末の `ignore` で逃がす
 - 依存パッケージを使わない（Node 標準ライブラリのみ）
 
 ## 未確認・未決事項

@@ -1,6 +1,6 @@
 {
   "name": "harness-doc",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "ドキュメント作成ハーネス。対話で導入する setup-project、文書を書く・直す依頼の入口で規模を判定する plan-doc、読者プロファイルを差し替えて書く manual-writer、テイストを変える change-tone、文書群の読者と範囲を変える change-policy の各スキル、予備知識のない読者になりきる doc-reviewer エージェント、曖昧語・見出し・リンク切れ・アンカー切れを検査する check-docs フックを提供する",
   "author": {
     "name": "mizuta0711"

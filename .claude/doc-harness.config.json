@@ -11,6 +11,8 @@
     "CHANGELOG.md",
     "plugins/**/examples/bad.md"
   ],
+  "completeCheck": "off",
+  "$comment_completeCheck": "コミット時の検査を切る。ブリーフと内部の改訂記録を置かず、改訂意図は CHANGELOG と DocumentTemplete の記録が持つ（DocumentTemplete background/05 の D4）",
   "linters": {
     "markdownlint": true,
     "textlint": true

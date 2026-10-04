@@ -5,6 +5,8 @@
  *   node complete-doc.mjs --mark [--reset] [--dest <project-dir>] [文書のパス...]   作業を始める前の基準点を記録する
  *   node complete-doc.mjs --mark --add [文書のパス...]     作業の途中で直す文書が増えたとき、基準点に足す（記録済みは上書きしない）
  *   node complete-doc.mjs --clear                          何も変えずに作業を終えたとき、基準点を消す
+ *   node complete-doc.mjs compare <文書...>                基準点と今の文書の数値・見出しを比べる（前後確認）
+ *   node complete-doc.mjs restore <文書...>                文書を基準点の中身に戻す（依頼者が「やり直す」を選んだとき）
  *   node complete-doc.mjs [--dest <project-dir>] [--staged] [--allow-queries] [文書のパス...]
  *
  * 文書のパスを省くと、git の差分から変わった文書（config の include に当たる .md / .html）を集める。
@@ -32,8 +34,8 @@
  *
  * 終了コード: 0 = 通過（または git 管理外で検査できない）、1 = 通らない項目がある、2 = 使い方の誤り
  *
- * いまはスキル（plan-doc・manual-writer・change-tone）が完了報告の前に呼ぶ。止める力はスキルの指示と同じで、
- * コミット時のフックで止めるのは次の版（改善計画の P2b）。
+ * スキル（plan-doc・manual-writer・change-tone）が完了報告の前に呼ぶ。コミットの時点では、フック（hooks/scripts/commit-check.mjs）が
+ * 同じ検査をステージした中身で行い、記録が無ければ止める。
  * Node 標準ライブラリのみ。
  */
 import fs from "node:fs";
@@ -149,8 +151,17 @@ function loadBaseline(dest) {
   }
 }
 
+// コミット時の検査（hooks/scripts/commit-check.mjs）が、一時の index と比べる版（--amend なら HEAD~1）を差し替える
+const ctx = { env: null, base: "HEAD" };
+
+/** git の呼び出しに使う index と、比べる版を差し替える。引数なしで元に戻す */
+export function setGitContext({ indexFile = null, base = "HEAD" } = {}) {
+  ctx.env = indexFile ? { ...process.env, GIT_INDEX_FILE: indexFile } : null;
+  ctx.base = base;
+}
+
 function git(dest, args) {
-  return execFileSync("git", ["-C", dest, ...args], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+  return execFileSync("git", ["-C", dest, ...args], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], env: ctx.env || process.env });
 }
 
 /** "repo" / "not-repo" / "no-git"（git コマンドが無い） */
@@ -164,7 +175,7 @@ function gitState(dest) {
 
 function hasHead(dest) {
   try {
-    git(dest, ["rev-parse", "--verify", "HEAD"]);
+    git(dest, ["rev-parse", "--verify", ctx.base]);
     return true;
   } catch {
     return false;
@@ -180,7 +191,7 @@ function beforeOf(dest, rel, baseline = null) {
   if (baseline && hasOwn(baseline.files, rel)) return baseline.files[rel] ?? "";
   if (!hasHead(dest)) return "";
   try {
-    return git(dest, ["show", `HEAD:./${rel}`]);
+    return git(dest, ["show", `${ctx.base}:./${rel}`]);
   } catch {
     return "";
   }
@@ -217,19 +228,21 @@ function exists(dest, rel, staged) {
 export function changedDocs(dest, config, staged) {
   const names = new Set();
   const add = (out) => out.split("\0").map((s) => s.trim()).filter(Boolean).forEach((f) => names.add(toPosix(f)));
-  if (staged) add(git(dest, ["diff", "--cached", "--relative", "--name-only", "--diff-filter=ACMRD", "-z"]));
+  if (staged) add(git(dest, ["diff", "--cached", ...(hasHead(dest) ? [ctx.base] : []), "--relative", "--name-only", "--diff-filter=ACMRD", "-z"]));
   else {
-    if (hasHead(dest)) add(git(dest, ["diff", "HEAD", "--relative", "--name-only", "--diff-filter=ACMRD", "-z"]));
+    if (hasHead(dest)) add(git(dest, ["diff", ctx.base, "--relative", "--name-only", "--diff-filter=ACMRD", "-z"]));
     else add(git(dest, ["ls-files", "--cached", "-z"])); // HEAD が無いリポジトリでは、ステージした新しい文書も拾う
     add(git(dest, ["ls-files", "--others", "--exclude-standard", "-z"]));
   }
   const styleRel = toPosix(config.styleDir || "docs-style") + "/";
   const historyRel = toPosix(config.historyDir || "docs-style/history") + "/";
+  const plansRel = toPosix(config.plansDir || "docs-style/plans") + "/";
   return [...names].filter(
     (rel) =>
       (isHtmlPath(rel) || /\.md$/i.test(rel)) &&
       !rel.startsWith(styleRel) &&
       !rel.startsWith(historyRel) &&
+      !rel.startsWith(plansRel) &&
       !rel.startsWith(".claude/") &&
       matchesAny(rel, config.include || []) &&
       !matchesAny(rel, config.exclude || [])
@@ -308,6 +321,81 @@ function issueKeys(issues) {
   return m;
 }
 
+// ---------------------------------------------------------------------------
+// 改訂設計書（plan-doc が M・L で作る。docs-style/plans/YYYYMMDD_<名前>.md）
+// ---------------------------------------------------------------------------
+
+/** 改訂設計書の「## 見出し」の節の本文（無ければ null） */
+function planSection(text, title) {
+  const lines = String(text).replace(/\r\n/g, "\n").split("\n");
+  const i = lines.findIndex((l) => new RegExp(`^##\\s+${title}\\s*$`).test(l));
+  if (i < 0) return null;
+  let j = i + 1;
+  while (j < lines.length && !/^##\s/.test(lines[j])) j++;
+  return lines.slice(i + 1, j).join("\n");
+}
+
+/**
+ * 改訂設計書を読む。
+ * 戻り値: { state, docs, unchecked: [文言], beforeAfter: 前後確認の節の中身（コメントを除く。無ければ ""） }
+ * 未チェックは「受け入れ基準」と「タスク一覧」の節の `- [ ]`。完了処理のタスクは、検査の時点ではまだ済んでいないので数えない。
+ * 「対象外（理由）」と書いた行も数えない（黙って消すことはできない。設計 §11）
+ */
+export function parsePlan(text) {
+  const src = String(text).replace(/\r\n/g, "\n");
+  const row = (name) => {
+    const m = src.match(new RegExp(`^\\|\\s*${name}\\s*\\|(.*)\\|\\s*$`, "m"));
+    return m ? m[1].trim() : "";
+  };
+  const docs = [...row("対象の文書").matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  const unchecked = [];
+  for (const title of ["受け入れ基準", "タスク一覧"]) {
+    const body = planSection(src, title) || "";
+    for (const l of body.split("\n")) {
+      const m = l.match(/^\s*[-*]\s+\[ \]\s+(.*)$/);
+      // 満たさないと決めた項目は「対象外（理由）」と書けば数えない（理由の無い「対象外」は数える）
+      // 「対象外（理由）」は行末だけで見る（雛形の説明の中の「対象外（新規作成）」に当てない）。完了処理のタスクは行頭で見る
+      if (m && !/^完了処理/.test(m[1].trim()) && !/対象外[（(][^）)]+[）)]\s*$/.test(m[1])) unchecked.push(m[1].trim());
+    }
+  }
+  const beforeAfter = (planSection(src, "前後確認") || "").replace(/<!--[\s\S]*?-->/g, "").trim();
+  return { state: row("状態"), docs, unchecked, beforeAfter };
+}
+
+/**
+ * 改訂設計書の一覧（completed/ は除く）。
+ * staged なら index の中身を読み、そのコミットで変わったものに inCommit を付ける。ageDays はファイル名の日付から
+ */
+export function planStates(dest, config, { staged = false } = {}) {
+  const dir = toPosix(config.plansDir || "docs-style/plans").replace(/\/$/, "");
+  let files = [];
+  let changed = new Set();
+  if (staged) {
+    try {
+      files = git(dest, ["ls-files", "-z", "--", dir]).split("\0").filter(Boolean);
+      const diff = git(dest, ["diff", "--cached", ...(hasHead(dest) ? [ctx.base] : []), "--relative", "--name-only", "-z", "--", dir]);
+      changed = new Set(diff.split("\0").filter(Boolean));
+    } catch {
+      files = [];
+    }
+  } else if (fs.existsSync(path.join(dest, dir))) {
+    files = fs.readdirSync(path.join(dest, dir)).map((f) => `${dir}/${f}`);
+  }
+  const today = Date.now();
+  return files
+    .map(toPosix)
+    .filter((f) => f.endsWith(".md") && path.posix.dirname(f) === dir && !/TEMPLATE\.md$/i.test(f))
+    .map((f) => {
+      const p = parsePlan(after(dest, f, staged));
+      const d = path.posix.basename(f).match(/^(\d{4})(\d{2})(\d{2})_/);
+      const ageDays = d ? Math.floor((today - Date.UTC(+d[1], +d[2] - 1, +d[3])) / 86400000) : 0;
+      return { file: f, ...p, inCommit: changed.has(f), ageDays };
+    });
+}
+
+/** 内部の改訂記録の節の規模（見出しの「規模 M」）。無ければ null */
+const sizeOf = (s) => (s.heading.match(/規模\s*([SML])/) || [])[1] || null;
+
 const QUERY_MARK = /<!--\s*問い合わせ\s*[:：]/;
 
 /** 1本の文書を検査する。戻り値: { rel, problems: [], warnings: [] } */
@@ -345,6 +433,32 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
   const nowByHeading = new Map(nowSections.map((s) => [s.heading, s.text]));
   if (oldSections.some((s) => nowByHeading.has(s.heading) && nowByHeading.get(s.heading) !== s.text))
     warnings.push(`内部の改訂記録（${hFile}）の過去の節が書き換えられている（過去の節は書き換えない）`);
+  // 改訂設計書: 規模 M・L の改訂には要る（テイスト変更は 0.11.0 まで対象外）。未チェックの基準・タスクと、前後確認の空を止める
+  for (const s of added) {
+    const size = sizeOf(s);
+    if (size !== "M" && size !== "L") continue;
+    if (/テイスト変更/.test(s.heading)) continue;
+    const ref = String(s.items["改訂設計書"] || "").replace(/`/g, "").trim();
+    if (!ref || /^なし/.test(ref)) {
+      problems.push(`規模 ${size} の改訂なのに、内部の改訂記録に改訂設計書のパスが無い（plan-doc の M・L の経路で改訂設計書を作る）`);
+      continue;
+    }
+    const planRel = relOf(dest, ref);
+    const planText = after(dest, planRel, staged);
+    if (!planText) {
+      problems.push(
+        staged && fs.existsSync(path.join(dest, planRel))
+          ? `改訂設計書（${planRel}）がこのコミットに入っていない（文書・記録と一緒にコミットする）`
+          : `改訂設計書（${planRel}）が無い`
+      );
+      continue;
+    }
+    const plan = parsePlan(planText);
+    if (plan.unchecked.length)
+      problems.push(`改訂設計書（${planRel}）に未チェックの受け入れ基準・タスクが残っている: ${plan.unchecked.slice(0, 3).join(" / ")}${plan.unchecked.length > 3 ? " ほか" : ""}（満たさないと決めたものは、行を消さずに末尾に「対象外（理由）」と書く）`);
+    if (before(dest, rel) && exists(dest, rel, staged) && !plan.beforeAfter)
+      problems.push(`改訂設計書（${planRel}）の「前後確認」が空（既存の文書を変えたときは、compare の結果と事実の変更の一覧を書く）`);
+  }
   if (!exists(dest, rel, staged)) return { rel, problems, warnings }; // 削除した文書は記録だけを見る
   // 2. 読者向けの改訂履歴
   const docItem = r.brief.docs[r.docKey]?.["読者向けの改訂履歴"]?.value;
@@ -392,6 +506,77 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
   return { rel, problems, warnings };
 }
 
+// ---------------------------------------------------------------------------
+// 前後確認の数値（compare）と、作業前に戻す（restore）
+// ---------------------------------------------------------------------------
+
+/** 文書の見出し（Markdown の # と HTML の h1〜h6。コードの中は見ない） */
+function headingsOf(text, html) {
+  const src = String(text || "").replace(/\r\n/g, "\n");
+  if (html) {
+    const body = stripHtmlCode(src);
+    return [...body.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi)].map((m) => `${"#".repeat(+m[1])} ${m[2].replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()}`);
+  }
+  return stripMdCode(src)
+    .split("\n")
+    .filter((l) => /^#{1,6}\s/.test(l))
+    .map((l) => l.replace(/\s*#*\s*$/, "").trim());
+}
+
+/** 本文の字数（タグ・記法・空白を除く） */
+function bodyChars(text, html) {
+  let s = String(text || "");
+  if (html) s = s.replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, "").replace(/&[a-z]+;|&#\d+;/gi, "x");
+  else s = s.replace(/<!--[\s\S]*?-->/g, "").replace(/^(```|~~~).*$/gm, "").replace(/[#>*_`|\-[\]()!]/g, "");
+  return s.replace(/\s+/g, "").length;
+}
+
+/** 図の数: <img>・<svg>・<figure>・Markdown の画像・mermaid のコードブロック（CSS で描いた図は数えない） */
+function figuresOf(text, html) {
+  const s = String(text || "");
+  if (html) return (s.match(/<(img|svg|figure)\b/gi) || []).length;
+  return (s.match(/!\[[^\]]*\]\([^)]*\)/g) || []).length + (s.match(/^(```|~~~)\s*mermaid/gm) || []).length;
+}
+
+/** 前後の数値と見出しの比較。before が null なら新しい文書 */
+export function compareDoc(beforeText, afterText, html) {
+  const m = (t) =>
+    t === null
+      ? null
+      : {
+          lines: String(t).split(/\r?\n/).length,
+          chars: bodyChars(t, html),
+          headings: headingsOf(t, html),
+          figures: figuresOf(t, html),
+          queries: (String(t).match(/<!--\s*問い合わせ\s*[:：]/g) || []).length,
+        };
+  const b = m(beforeText);
+  const a = m(afterText);
+  const ratio = b && b.chars ? a.chars / b.chars : null;
+  const added = b ? a.headings.filter((h) => !b.headings.includes(h)) : a.headings;
+  const removed = b ? b.headings.filter((h) => !a.headings.includes(h)) : [];
+  // 設計 §3-3 の「書いた後の条件」。当たれば前後確認を必須にする
+  const condition = ratio !== null && (ratio >= 1.5 || ratio <= 0.67);
+  return { before: b, after: a, ratio, added, removed, condition };
+}
+
+function printCompare(rel, r, say) {
+  say(`[complete-doc] ${rel}`);
+  if (!r.before) {
+    say(`  新しい文書: ${r.after.lines}行・本文 ${r.after.chars}字・見出し ${r.after.headings.length}・図 ${r.after.figures}・問い合わせの印 ${r.after.queries}`);
+    return;
+  }
+  const row = (name, k) => `  ${name}: ${r.before[k]} → ${r.after[k]}`;
+  say(row("行数", "lines"));
+  say(`  本文の字数: ${r.before.chars} → ${r.after.chars}${r.ratio !== null ? `（${r.ratio.toFixed(2)} 倍）` : ""}`);
+  say(`  見出しの数: ${r.before.headings.length} → ${r.after.headings.length}`);
+  say(row("図の数", "figures"));
+  say(row("問い合わせの印", "queries"));
+  if (r.added.length) say(`  増えた見出し: ${r.added.join(" / ")}`);
+  if (r.removed.length) say(`  消えた見出し: ${r.removed.join(" / ")}`);
+  if (r.condition) say("  ⚠️ 本文の字数が 1.5 倍以上か 0.67 倍以下に変わった。前後確認を必須にする（S なら完了報告の問いに前後確認を含める）");
+}
+
 function main() {
   const args = process.argv.slice(2);
   let dest = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -416,6 +601,8 @@ function main() {
         "usage: node complete-doc.mjs --mark [--reset] [文書のパス...]  作業前の基準点を記録する（--reset で作り直す）\n" +
           "       node complete-doc.mjs --mark --add [文書のパス...]      直す文書が増えたとき、基準点に足す\n" +
           "       node complete-doc.mjs --clear                           何も変えずに作業を終えたとき、基準点を消す\n" +
+          "       node complete-doc.mjs compare <文書のパス...>           基準点と今の文書の数値と見出しを比べる（前後確認）\n" +
+          "       node complete-doc.mjs restore <文書のパス...>           文書を基準点の中身に戻す（依頼者が「やり直す」を選んだとき）\n" +
           "       node complete-doc.mjs [--dest <project-dir>] [--staged] [--allow-queries] [文書のパス...]" +
           NL
       );
@@ -425,6 +612,7 @@ function main() {
       process.exit(2);
     } else files.push(a);
   }
+  const sub = files[0] === "compare" || files[0] === "restore" ? files.shift() : null;
   if ((add || reset) && !mark) {
     process.stderr.write("--add と --reset は --mark と一緒に使う" + NL);
     process.exit(2);
@@ -446,6 +634,38 @@ function main() {
   }
   const loaded = loadConfig(dest);
   const config = loaded.config || DEFAULT_CONFIG;
+  if (sub) {
+    const b = loadBaseline(dest);
+    if (!b) {
+      say("[complete-doc] 作業前の基準点が無いので、比べる・戻すことができない（作業の始めに --mark を走らせる）");
+      process.exit(1);
+    }
+    if (!files.length) {
+      process.stderr.write(`${sub} には文書のパスを渡す` + NL);
+      process.exit(2);
+    }
+    if (b.passed || (b.head && b.head !== headOf(dest)))
+      say(`[complete-doc] 警告: 基準点（${b.createdAt} に記録）は${b.passed ? "前の作業で通過済み" : "その後にコミットがある"}。この作業の作業前かを確かめる（違えば作業の始めに --mark を走らせる）`);
+    let bad = false;
+    for (const rel of [...new Set(files.map((f) => relOf(dest, f)))]) {
+      if (!hasOwn(b.files, rel)) {
+        say(`[complete-doc] ${rel}: 基準点に無い（--mark --add で足していない文書）`);
+        bad = true;
+        continue;
+      }
+      if (sub === "compare") printCompare(rel, compareDoc(b.files[rel], readOrNull(dest, rel) ?? "", isHtmlPath(rel)), say);
+      else {
+        const abs = path.join(dest, rel);
+        if (b.files[rel] === null) fs.rmSync(abs, { force: true });
+        else {
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, b.files[rel]);
+        }
+        say(`[complete-doc] ${rel}: 作業前の中身に戻した${b.files[rel] === null ? "（作業前は無かったので消した）" : ""}`);
+      }
+    }
+    process.exit(bad ? 1 : 0);
+  }
   if (mark) {
     const r = markBaseline(dest, files, { add, reset, config });
     if (r.merged)

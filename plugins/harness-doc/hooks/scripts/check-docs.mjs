@@ -51,6 +51,10 @@ export const DEFAULT_CONFIG = {
   glossaryFiles: [],
   /** 内部の改訂記録の置き場所（scripts/history.mjs）。styleDir の下なので検査の対象外 */
   historyDir: "docs-style/history",
+  /** 改訂設計書の置き場所（plan-doc が M・L で作る）。完了したら <plansDir>/completed/ に移す。styleDir の下なので検査の対象外 */
+  plansDir: "docs-style/plans",
+  /** コミット時の検査（hooks/scripts/commit-check.mjs）: "block"（止める）/ "warn"（警告だけ）/ "off"（何もしない） */
+  completeCheck: "block",
   /** 読者向けの改訂履歴の節の見出し（scripts/complete-doc.mjs が探す）。既存のサイトが「更新履歴」なら setup-project が合わせる */
   revisionHeadings: ["改訂履歴"],
   /** 文体。endings: "keitai"（です・ます）/ "jotai"（だ・である）/ null（検査しない） */
@@ -707,6 +711,8 @@ export function checkFile(absPath, dir, config, style) {
   if (rel.startsWith("../") || path.isAbsolute(rel)) return null;
   const styleRel = toPosix(config.styleDir || "docs-style") + "/";
   if (rel.startsWith(styleRel)) return null;
+  // 内部の改訂記録と改訂設計書は、styleDir の外に置いても読者向けの文書ではない
+  for (const d of [config.historyDir, config.plansDir]) if (d && rel.startsWith(toPosix(d).replace(/\/$/, "") + "/")) return null;
   if (rel.startsWith(".claude/")) return null; // ブリーフ（.claude/rules/doc-brief-*.md）や設定は文書ではない
   if (!matchesAny(rel, config.include)) return null;
   if (matchesAny(rel, config.exclude)) return null;

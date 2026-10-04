@@ -141,7 +141,7 @@ export function apply(templateDir, dest, items) {
  * config に値を書き込む。オブジェクト（voice ほか）は1段だけ合成し、配列（include ほか）は置き換える。
  * 知らないキーは拒否する（綴りの誤りで黙って効かない設定を作らない）。
  */
-export const CONFIG_KEYS = ["styleDir", "include", "exclude", "requiredHeadings", "linters", "glossaryFiles", "voice", "rules", "historyDir", "revisionHeadings"];
+export const CONFIG_KEYS = ["styleDir", "include", "exclude", "requiredHeadings", "linters", "glossaryFiles", "voice", "rules", "historyDir", "revisionHeadings", "plansDir", "completeCheck"];
 export function mergeConfig(current, patch) {
   const unknown = Object.keys(patch).filter((k) => !CONFIG_KEYS.includes(k));
   if (unknown.length) throw new Error(`知らない設定キー: ${unknown.join(", ")}`);

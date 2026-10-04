@@ -486,3 +486,82 @@ test("基準点: --add は記録済みの文書を上書きせず、新しい文
   assert.match(b.files["docs/usage/phone.md"], /1\. 押す/, "上書きしていない");
   assert.equal(b.files["docs/usage/other.md"], "# other\n");
 });
+
+// ---------------------------------------------------------------------------
+// 改訂設計書（0.10.0）・compare・restore
+// ---------------------------------------------------------------------------
+
+const PLAN_OK = (extra = "") => `# 改訂設計書: phone
+
+| 項目 | 内容 |
+|---|---|
+| 状態 | 完了 |
+| 対象の文書 | \`docs/usage/phone.md\` |
+
+## 受け入れ基準
+
+- [x] 読者が文書だけで発信できる
+- [ ] 通話を録音できる 対象外（アプリに録音が無い）
+
+## タスク一覧
+
+- [x] 書く
+- [ ] 完了処理（記録・改訂履歴・complete-doc）
+
+## 前後確認
+
+本文の字数 120 → 180。事実の変更なし
+${extra}`;
+
+test("改訂設計書: 規模 M の記録にパスが無い・未チェックが残る・前後確認が空なら NG。対象外（理由）と完了処理は数えない", async () => {
+  const dir = projectWithDoc(PHONE);
+  const { loadBriefs } = await import("../plugins/harness-doc/scripts/brief.mjs");
+  fs.writeFileSync(path.join(dir, "docs", "usage", "phone.md"), PHONE_DONE);
+  addSection(dir, section({ size: "M", 読者向けの改訂履歴: "直しました", 改訂設計書: "なし" }), "2026-10-05");
+  assert.match(checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems.join("\n"), /改訂設計書のパスが無い/);
+  const plan = "docs-style/plans/completed/20261006_phone.md";
+  fs.mkdirSync(path.join(dir, "docs-style", "plans", "completed"), { recursive: true });
+  fs.writeFileSync(path.join(dir, plan), PLAN_OK().replace("- [x] 書く", "- [ ] 書く"));
+  addSection(dir, section({ size: "M", 読者向けの改訂履歴: "直しました", 改訂設計書: `\`${plan}\`` }), "2026-10-06");
+  let p = checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems.join("\n");
+  assert.match(p, /未チェック.*書く/);
+  assert.doesNotMatch(p, /録音|完了処理/);
+  fs.writeFileSync(path.join(dir, plan), PLAN_OK().replace("本文の字数 120 → 180。事実の変更なし", "<!-- 既存の文書を変えたときに書く -->"));
+  p = checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems.join("\n");
+  assert.match(p, /前後確認」が空/);
+});
+
+test("改訂設計書: テイスト変更の節と規模 S は改訂設計書を求めない", async () => {
+  const dir = projectWithDoc(PHONE);
+  const { loadBriefs } = await import("../plugins/harness-doc/scripts/brief.mjs");
+  fs.writeFileSync(path.join(dir, "docs", "usage", "phone.md"), PHONE_DONE);
+  addSection(dir, section({ size: "M", label: "テイスト変更: phone.md", 読者向けの改訂履歴: "直しました", 改訂設計書: "なし" }));
+  assert.deepEqual(checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems, []);
+});
+
+test("compare: 字数の倍率と見出しの増減を出し、1.5 倍以上で条件に当たる。restore で作業前に戻す", () => {
+  const dir = projectWithDoc(PHONE);
+  run(COMPLETE_CLI, ["--mark", "--dest", dir, "docs/usage/phone.md", "docs/usage/new.md"]);
+  fs.writeFileSync(path.join(dir, "docs", "usage", "phone.md"), PHONE.replace("1. 押す", "1. 押す\n\n## うまくいかない場合\n\n電話の許可を求める画面が出たら、許可を選んでから、もう一度発信を押してください。"));
+  fs.writeFileSync(path.join(dir, "docs", "usage", "new.md"), "# 新しい\n");
+  const c = run(COMPLETE_CLI, ["compare", "--dest", dir, "docs/usage/phone.md", "docs/usage/new.md"]);
+  assert.equal(c.status, 0, c.stdout);
+  assert.match(c.stdout, /増えた見出し: ## うまくいかない場合/);
+  assert.match(c.stdout, /前後確認を必須にする/);
+  assert.match(c.stdout, /新しい文書/);
+  const r = run(COMPLETE_CLI, ["restore", "--dest", dir, "docs/usage/phone.md", "docs/usage/new.md"]);
+  assert.equal(r.status, 0, r.stdout);
+  assert.equal(fs.readFileSync(path.join(dir, "docs", "usage", "phone.md"), "utf-8"), PHONE);
+  assert.equal(fs.existsSync(path.join(dir, "docs", "usage", "new.md")), false, "作業前に無かった文書は消す");
+  assert.equal(run(COMPLETE_CLI, ["compare", "--dest", dir, "docs/usage/other.md"]).status, 1, "基準点に無い文書");
+});
+
+test("M7: 雛形のタスクは、説明の中の「対象外（新規作成）」で未チェックから外れない。行末の「対象外（理由）」だけ外れる", async () => {
+  const { parsePlan } = await import("../plugins/harness-doc/scripts/complete-doc.mjs");
+  const tpl = fs.readFileSync(path.join(here, "..", "plugins", "harness-doc", "skills", "plan-doc", "TEMPLATE.md"), "utf-8");
+  const p = parsePlan(tpl);
+  assert.ok(p.unchecked.some((u) => u.startsWith("前後確認を書く")), p.unchecked.join("\n"));
+  assert.ok(!p.unchecked.some((u) => u.startsWith("完了処理")));
+  const done = parsePlan(tpl.replace("と書き足す）", "と書き足す） 対象外（新規作成）"));
+  assert.ok(!done.unchecked.some((u) => u.startsWith("前後確認を書く")));
+});
