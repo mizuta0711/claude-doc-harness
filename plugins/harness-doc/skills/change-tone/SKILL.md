@@ -90,8 +90,14 @@ node "${CLAUDE_SKILL_DIR}/../setup-project/scripts/apply.mjs" --brief '{"name":"
 ## Step 4: 書き換える
 
 1. **作業前の状態を残す。** git 管理下なら `git status --short` で、対象に未コミットの変更が無いことを確かめる。
-   あれば、先にコミットするかを聞く（混ざると差分で確かめられない）
-2. 対象を**1本ずつ**書き換える。守ること:
+   あれば、先にコミットするかを聞く（混ざると差分で確かめられない）。
+   続けて、作業前の基準点を記録する（完了処理の検査が、この時点と比べる）
+
+   ```bash
+   node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" --mark <書き換える文書...>
+   ```
+
+2. 対象を**1本ずつ**、**`Edit` で**書き換える（Bash の python や sed で一括置換しない。検査のフックが働かず、改行コードも崩れやすい）。守ること:
 
    | 変えてよい | 変えない |
    |---|---|
@@ -134,7 +140,8 @@ node "${CLAUDE_SKILL_DIR}/../setup-project/scripts/apply.mjs" --brief '{"name":"
    ```
 
 2. ブリーフで読者向けの改訂履歴が「あり」の文書には、それぞれの「改訂履歴」の節に1行足す（「文章をやさしい言葉に書き直しました」）
-3. 完了処理の検査を通す（`node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" <書き換えた文書...>`）。`NG` が出たら直す
+3. 完了処理の検査を通す（`node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" <書き換えた文書...>`）。`NG` が出たら直す。
+   「判定できない」（基準点が無い）は直そうとせず、完了報告にそう書く
 
 ## 完了報告
 
