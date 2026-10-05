@@ -91,3 +91,11 @@ test("N6・N7: cmd /c の cd /d を読む。cd - は行き先を決められな�
   assert.equal(r.commits[0].dir, dir);
   assert.ok(readCommand(`cd - && git commit -m x`, { cwd: dir }).unsupported);
 });
+
+test("G2: skip の理由は「改訂の記録なしでコミットする: <理由>」の形だけ受け付ける（承認の画面の本文で読めるように）", () => {
+  const dir = repo();
+  assert.equal(bash(dir, `git commit -m "doc-record: skip（ツールが直した）" -- ${DOC}`), "deny");
+  const r = run({ tool_name: "Bash", tool_input: { command: `git commit -m "doc-record: skip（ツールが直した）" -- ${DOC}` }, cwd: dir });
+  assert.match(r.lines.join("\n"), /改訂の記録なしでコミットする: <理由>/);
+  assert.equal(bash(dir, `git commit -m "doc-record: skip（改訂の記録なしでコミットする: ツールが直した）" -- ${DOC}`), "ask");
+});

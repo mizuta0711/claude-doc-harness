@@ -130,8 +130,16 @@ export function addSection(dest, input, date = today()) {
   if (names.length > 1) throw new Error(`文書群をまたいでいる（${names.join(", ")}）。文書群ごとに分けて足す`);
   const { file, brief } = located[0];
   if (!fs.existsSync(file)) initHistory(dest, brief.name, brief.title);
-  const section = renderSection({ ...input, docs: located.map((l) => l.docKey) }, date);
+  let section = renderSection({ ...input, docs: located.map((l) => l.docKey) }, date);
   const text = fs.readFileSync(file, "utf-8").replace(/\r\n/g, "\n");
+  // 同じ見出しの節を作らない（同じ日に同じ文書を2回直したとき）。見出しで節を引く人と道具が取り違えないように（P3a-3 の G1）
+  const headings = new Set(parseSections(text).map((s) => s.heading));
+  const first = section.split(NL)[0].replace(/^##\s+/, "");
+  if (headings.has(first)) {
+    let k = 2;
+    while (headings.has(`${first}（${k}）`)) k++;
+    section = section.replace(/^[^\n]*/, () => `## ${first}（${k}）`); // 関数で渡す（見出しの $ を置換の記号と読ませない）
+  }
   // 最初の節（コメントの外の「## 」）の前に差し込む。無ければ末尾
   const masked = text.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " "));
   const idx = masked.search(/^## /m);

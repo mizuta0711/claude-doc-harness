@@ -99,7 +99,7 @@ test("引用符の中の git commit・config の無いリポジトリ・complete
 test("doc-record: skip（理由）は依頼者の承認（ask）。理由が空なら止める", () => {
   const { dir } = repo();
   edit(dir);
-  const ask = bash(dir, `git commit -m "README の誤字 doc-record: skip（dev-harness の update-docs が直した）" -- ${DOC}`);
+  const ask = bash(dir, `git commit -m "README の誤字 doc-record: skip（改訂の記録なしでコミットする: dev-harness の update-docs が直した）" -- ${DOC}`);
   assert.equal(ask.decision, "ask");
   assert.match(ask.lines[0], /依頼者の承認/);
   assert.equal(bash(dir, `git commit -m "doc-record: skip（）" -- ${DOC}`).decision, "deny");

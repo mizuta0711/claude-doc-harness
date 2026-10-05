@@ -393,6 +393,53 @@ export function planStates(dest, config, { staged = false } = {}) {
     });
 }
 
+/**
+ * 作業前と今の内部の改訂記録の節を比べる。戻り値: { added: 足された節, rewritten: 過去の節が書き換えられたか }
+ * 見出しでは比べない。同じ日に同じ文書を2回直すと同じ見出しの節が2つでき、見出しで比べると取り違える
+ * （実地検証 P3a-3 の G1: 誤った「書き換えられている」の警告と、足した節を「足されていない」とする誤り）。
+ * 新しい節は上に足すので、今の記録の末尾が作業前の記録と同じなら、先頭の残りが足した節。
+ * そうでなければ、中身の多重集合で比べる（作業前に無かった中身の節が足した節、作業前の中身が今に無ければ書き換え・削除）。
+ * どちらでも、作業前にある節と同じ中身の節は「足した節」にしない（過去の節を写しただけで通さない。0.10.1 の査読 1）。
+ * history.mjs add は同じ見出しに（2）を付けるので、正当に足した節が過去の節と同じ中身になることは無い
+ */
+export function diffSections(oldSections, nowSections) {
+  const oldTexts = new Set(oldSections.map((s) => s.text));
+  const n = nowSections.length - oldSections.length;
+  if (n >= 0 && oldSections.every((s, i) => nowSections[n + i].text === s.text)) {
+    const head = nowSections.slice(0, n);
+    return { added: head.filter((s) => !oldTexts.has(s.text)), rewritten: false, copied: head.filter((s) => oldTexts.has(s.text)), gone: [] };
+  }
+  const count = new Map();
+  for (const s of oldSections) count.set(s.text, (count.get(s.text) || 0) + 1);
+  const unmatched = [];
+  for (const s of nowSections) {
+    const c = count.get(s.text) || 0;
+    if (c > 0) count.set(s.text, c - 1);
+    else unmatched.push(s);
+  }
+  // 中身が合わなかった作業前の節。見出しが同じ今の節は、書き換えた節であって足した節ではない
+  const gone = oldSections.filter((s) => {
+    const c = count.get(s.text) || 0;
+    if (c > 0) {
+      count.set(s.text, c - 1);
+      return true;
+    }
+    return false;
+  });
+  // 見出しで対にするときは下（古い側）から探す。同じ見出しの節で書き換えと追加が同時に起きたとき、
+  // 上の新しい節を書き換えと取り違えないように（0.10.1 の査読 4）
+  const goneHeadings = gone.map((s) => s.heading);
+  const paired = new Set();
+  for (let k = unmatched.length - 1; k >= 0; k--) {
+    const i = goneHeadings.indexOf(unmatched[k].heading);
+    if (i < 0) continue;
+    goneHeadings.splice(i, 1);
+    paired.add(unmatched[k]);
+  }
+  const added = unmatched.filter((s) => !paired.has(s) && !oldTexts.has(s.text));
+  return { added, rewritten: gone.length > 0, copied: [], gone };
+}
+
 /** 内部の改訂記録の節の規模（見出しの「規模 M」）。無ければ null */
 const sizeOf = (s) => (s.heading.match(/規模\s*([SML])/) || [])[1] || null;
 
@@ -415,12 +462,12 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
     );
     return { rel, problems, warnings };
   }
-  // 1. 内部の改訂記録: HEAD に無い見出しの節が足され、それがこの文書を対象にしている
+  // 1. 内部の改訂記録: 作業前に無かった節が足され、それがこの文書を対象にしている
   const hFile = toPosix(path.relative(dest, historyFile(dest, r.brief.name)));
   const oldSections = parseSections(before(dest, hFile));
-  const oldHeadings = new Set(oldSections.map((s) => s.heading));
   const nowSections = parseSections(after(dest, hFile, staged));
-  const added = nowSections.filter((s) => !oldHeadings.has(s.heading) && mentions(s, r.docKey));
+  const diff = diffSections(oldSections, nowSections);
+  const added = diff.added.filter((s) => mentions(s, r.docKey));
   if (!added.length) problems.push(`内部の改訂記録（${hFile}）に、この文書の節が足されていない（history.mjs add で書く）`);
   else if (added.some((s) => !String(s.items["改訂意図"] || "").trim())) problems.push(`内部の改訂記録（${hFile}）の改訂意図が空`);
   else if (strict && !staged && !baseline && beforeOf(dest, hFile) !== after(dest, hFile, false))
@@ -430,9 +477,12 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
         "直そうとせず、完了報告に「基準点が無く判定できなかった」と書き、今回足した節を示す。" +
         "今から --mark して検査し直さない（今の状態が作業前になり、同じ節を二重に足すことになる）。次の作業からは、始めに --mark を走らせる"
     );
-  const nowByHeading = new Map(nowSections.map((s) => [s.heading, s.text]));
-  if (oldSections.some((s) => nowByHeading.has(s.heading) && nowByHeading.get(s.heading) !== s.text))
-    warnings.push(`内部の改訂記録（${hFile}）の過去の節が書き換えられている（過去の節は書き換えない）`);
+  if (diff.rewritten)
+    warnings.push(
+      `内部の改訂記録（${hFile}）の過去の節が書き換えられているか消されている（過去の節は書き換えない）: ${diff.gone.map((s) => `「${s.heading}」`).join("・")}`
+    );
+  if (diff.copied.length)
+    warnings.push(`内部の改訂記録（${hFile}）に、過去の節と同じ中身の節が足されている（写しは今回の記録として数えない）: ${diff.copied.map((s) => `「${s.heading}」`).join("・")}`);
   // 改訂設計書: 規模 M・L の改訂には要る（テイスト変更は 0.11.0 まで対象外）。未チェックの基準・タスクと、前後確認の空を止める
   for (const s of added) {
     const size = sizeOf(s);

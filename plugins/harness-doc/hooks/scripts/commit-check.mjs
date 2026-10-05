@@ -347,6 +347,8 @@ function applyOps(root, commit, opts, env) {
 // ---------------------------------------------------------------------------
 
 const SKIP = /doc-record:\s*skip\s*[（(]\s*([^）)]*?)\s*[）)]/;
+/** skip の理由の形。承認の画面に出る本文から、何を承認するのかが読めるように */
+const SKIP_FORM = /^改訂の記録なしでコミットする\s*[:：]\s*\S/;
 
 /** 1つのコミットを検査する。戻り値: { decision: "allow"|"warn"|"ask"|"deny", lines: [] } */
 export function checkCommit(commit, { shell = "bash", command = "", deadline = Infinity } = {}) {
@@ -404,14 +406,18 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
     if (!ng.length) return { decision: warn.length ? "warn" : "allow", lines: warn };
     if (mode === "warn") return { decision: "warn", lines: [...ng, ...warn] };
     const skip = SKIP.exec(command);
-    if (skip && skip[1].trim())
+    // 承認の画面にはフックの理由が出ず、コマンドの本文だけが出る（実地検証 P3a-3 の G2。systemMessage も出しているが表示されなかった）。
+    // 何を承認するのかが本文から読めるよう、理由の書き方をここで決める（スキルの指示だと AI が飛ばせる）
+    if (skip && SKIP_FORM.test(skip[1].trim()))
       return { decision: "ask", lines: [`コミットの文言に doc-record: skip（${skip[1].trim()}）がある。改訂の記録の無い文書を、依頼者の承認でコミットする`, ...ng] };
     return {
       decision: "deny",
       lines: [
         ...ng,
+        ...(skip ? [`doc-record: skip の理由は「改訂の記録なしでコミットする: <理由>」の形で書く（承認の画面にはコマンドの本文だけが出るので、何を承認するのかを本文に書く）`] : []),
         "改訂の記録を足してからコミットする（history.mjs add。読者向けの改訂履歴が「あり」なら文書にも1行）。" +
-          "harness-doc の工程を通さない正当な変更なら、そう依頼者に説明する（コミットの文言に doc-record: skip（理由）を書くと、依頼者の承認を求める）",
+          "harness-doc の工程を通さない正当な変更なら、そう依頼者に説明する。コミットの文言に doc-record: skip（改訂の記録なしでコミットする: <理由>）を書くと、" +
+          "ふつうのコマンドの実行確認と同じ画面で依頼者の承認を求める",
         ...warn,
       ],
     };
