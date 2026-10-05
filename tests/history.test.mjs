@@ -531,12 +531,26 @@ test("改訂設計書: 規模 M の記録にパスが無い・未チェックが
   assert.match(p, /前後確認」が空/);
 });
 
-test("改訂設計書: テイスト変更の節と規模 S は改訂設計書を求めない", async () => {
+test("改訂設計書: 規模 S は求めない。テイスト変更（0.11.0 から）は求める。試作のファイルが残っていれば NG", async () => {
   const dir = projectWithDoc(PHONE);
   const { loadBriefs } = await import("../plugins/harness-doc/scripts/brief.mjs");
   fs.writeFileSync(path.join(dir, "docs", "usage", "phone.md"), PHONE_DONE);
-  addSection(dir, section({ size: "M", label: "テイスト変更: phone.md", 読者向けの改訂履歴: "直しました", 改訂設計書: "なし" }));
-  assert.deepEqual(checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems, []);
+  addSection(dir, section({ 読者向けの改訂履歴: "直しました", 改訂設計書: "なし" }));
+  assert.deepEqual(checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems, [], "規模 S");
+  addSection(dir, section({ size: "M", label: "テイスト変更: phone.md", 読者向けの改訂履歴: "直しました", 改訂設計書: "なし" }), "2026-10-07");
+  assert.match(checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems.join("\n"), /改訂設計書のパスが無い/, "テイスト変更");
+  fs.writeFileSync(path.join(dir, "docs", "usage", "phone.proto-1.md"), "# 試作\n");
+  assert.match(checkDoc(dir, "docs/usage/phone.md", { briefs: loadBriefs(dir) }).problems.join("\n"), /試作のファイルが残っている: docs\/usage\/phone\.proto-1\.md/);
+});
+
+test("試作のファイルは、変わった文書として数えず、書き込みのたびの検査もしない", async () => {
+  const dir = projectWithDoc(PHONE);
+  fs.writeFileSync(path.join(dir, "docs", "usage", "phone.proto-1.md"), "# 試作\n\n適宜押す。\n");
+  const config = { ...DEFAULT_CONFIG, include: ["docs/**/*.md"] };
+  assert.deepEqual(changedDocs(dir, config, false), []);
+  const { isProto } = await import("../plugins/harness-doc/hooks/scripts/check-docs.mjs");
+  assert.equal(isProto("docs/a.proto-1.html"), true);
+  assert.equal(isProto("docs/a.prototype.html"), false);
 });
 
 test("compare: 字数の倍率と見出しの増減を出し、1.5 倍以上で条件に当たる。restore で作業前に戻す", () => {
@@ -564,4 +578,14 @@ test("M7: 雛形のタスクは、説明の中の「対象外（新規作成）�
   assert.ok(!p.unchecked.some((u) => u.startsWith("完了処理")));
   const done = parsePlan(tpl.replace("と書き足す）", "と書き足す） 対象外（新規作成）"));
   assert.ok(!done.unchecked.some((u) => u.startsWith("前後確認を書く")));
+});
+
+test("R2: 残っている試作は、文書の隣以外（試作の CSS）や大文字の名前でも見つける。.proto- の後が数字でなければ試作ではない", async () => {
+  const dir = projectWithDoc(PHONE);
+  const { protoFiles } = await import("../plugins/harness-doc/scripts/complete-doc.mjs");
+  fs.mkdirSync(path.join(dir, "docs", "css"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "docs", "css", "style.proto-1.css"), "a{}");
+  fs.writeFileSync(path.join(dir, "docs", "usage", "Phone.proto-2.md"), "# x");
+  fs.writeFileSync(path.join(dir, "docs", "usage", "phone.proto-notes.md"), "# x");
+  assert.deepEqual(protoFiles(dir).sort(), ["docs/css/style.proto-1.css", "docs/usage/Phone.proto-2.md"]);
 });

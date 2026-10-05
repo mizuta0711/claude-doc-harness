@@ -46,7 +46,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 
 | 結果 | 次 |
 |---|---|
-| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** 次のどれかに当たれば、**「導入済みのプロジェクトに足す」**（下の節）を行う。(1) ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無い（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list`）。(2) `CLAUDE.md` の「文書ルール（harness-doc）」の節が最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）と違う。(3) ブリーフの文書群に、内部の改訂記録（`docs-style/history/<名前>.md`）が無い。どれにも当たらなければ、文体を変えたいなら `change-tone`、読者や範囲を変えたいなら `change-policy` を案内して終える |
+| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** 次のどれかに当たれば、**「導入済みのプロジェクトに足す」**（下の節）を行う。(1) ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無い（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list`）。(2) `CLAUDE.md` の「文書ルール（harness-doc）」の節が最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）と違う。(3) ブリーフの文書群に、内部の改訂記録（`docs-style/history/<名前>.md`）が無い。どれにも当たらなければ、文体を変えたいなら `plan-doc`（テイスト変更）、読者や範囲を変えたいなら `change-policy` を案内して終える |
 | `existing: true`（利用者向けの文書の候補がある） | Step 2A（既存） |
 | `existing: false` | Step 2B（新規） |
 

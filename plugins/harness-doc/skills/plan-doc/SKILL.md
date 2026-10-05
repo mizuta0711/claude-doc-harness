@@ -1,6 +1,6 @@
 ---
 name: plan-doc
-description: 文書を書く・直す依頼の入口。直前に直した文書を続けて直す・元に戻す・書き方を変える依頼も、毎回ここから始める。依頼の性質（新規作成・改訂・誤りの修正・テイスト変更・方針変更・点検だけ）と規模（S/M/L）を判定し、経路を分ける。小さな修正（S）はこのスキルの中で、事実確認・修正・同じ記述の横展開・改訂の記録まで済ませる。M・L は改訂設計書を作って承認を取り、manual-writer・change-tone に渡す。読者や扱う範囲を変える依頼も、ここから change-policy に渡す。「〇〇の手順書を書いて」「この文書のここを直して」「マニュアルを分かりやすくして」「数値が間違っているので直して」「前の書き方に戻して」「さっきのページをもう少し直して」の入口。
+description: 文書を書く・直す依頼の入口。直前に直した文書を続けて直す・元に戻す・書き方を変える依頼も、毎回ここから始める。依頼の性質（新規作成・改訂・誤りの修正・テイスト変更・方針変更・点検だけ）と規模（S/M/L）を判定し、経路を分ける。小さな修正（S）はこのスキルの中で、事実確認・修正・同じ記述の横展開・改訂の記録まで済ませる。M・L は改訂設計書を作って承認を取り（L は Stage 1 と試作、テイスト変更は試作も）、manual-writer・change-tone に渡す。「マニュアルをもっとやさしい言葉にして」「です・ます調に統一して」のテイスト変更も、ここから始める。読者や扱う範囲を変える依頼も、ここから change-policy に渡す。「〇〇の手順書を書いて」「この文書のここを直して」「マニュアルを分かりやすくして」「数値が間違っているので直して」「前の書き方に戻して」「さっきのページをもう少し直して」の入口。
 argument-hint: "[何をどうしたいか（例: 電話のかけ方の手順3の権限の説明が実際と違うので直して）]"
 allowed-tools: "Read, Grep, Glob, Write, Edit, Bash, Agent, AskUserQuestion"
 ---
@@ -23,7 +23,7 @@ allowed-tools: "Read, Grep, Glob, Write, Edit, Bash, Agent, AskUserQuestion"
 | 内部の改訂記録（これまでの経緯） | `node "${CLAUDE_SKILL_DIR}/../../scripts/history.mjs" show <文書のパス>` |
 | 改訂の記録を足す | `node "${CLAUDE_SKILL_DIR}/../../scripts/history.mjs" add --json '<JSON>'`（本文に `'` が入るなら、JSON をファイルに書いて `--json-file <パス>`） |
 | 完了処理の検査・前後の比較 | `node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" <文書のパス...>`・`compare <文書のパス...>` |
-| 経路の手順・改訂設計書の雛形 | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path <S\|M>`・`plan-template` |
+| 経路の手順・改訂設計書の雛形 | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path <S\|M\|L\|tone>`・`plan-template` |
 | ブリーフを書く・作る | `node "${CLAUDE_SKILL_DIR}/../setup-project/scripts/apply.mjs" --brief '<JSON>'` |
 | CLAUDE.md の節の最新版 | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section` |
 
@@ -43,7 +43,9 @@ allowed-tools: "Read, Grep, Glob, Write, Edit, Bash, Agent, AskUserQuestion"
 |---|---|---|
 | S（完了時に聞くことが無い） | 規模と前提 | 1 |
 | S（事実の変更・横展開・用語の追加がある） | 規模と前提 → 完了報告での承認 | 2 |
-| M・L | 規模と前提 → 改訂設計書（受け入れ基準と目次案）→ 完了前の確認 | M 3・L 4（L の残りの1回は次の版の試作） |
+| M | 規模と前提 → 改訂設計書（受け入れ基準と目次案）→ 完了前の確認 | 3 |
+| L | 規模と前提 → Stage 1（ブリーフ・目次案・受け入れ基準・読者役による目次の点検）→ 試作 → 完了前の確認 | 4 |
+| テイスト変更（M・L） | 規模と前提 → 試作（改訂設計書の承認も同じ問いで）→ 完了前の確認 | M 3・L 4（L は試作の調整に1回の余り） |
 
 **作業の途中で聞きたくなったことは、その場で聞かず、完了報告の問いにまとめる。** 書き進められないほどの食い違いだけは例外。
 
@@ -63,7 +65,7 @@ allowed-tools: "Read, Grep, Glob, Write, Edit, Bash, Agent, AskUserQuestion"
 | 新規作成 | 対象のファイルが無い | 規模判定（新規は M 以上） |
 | 改訂 | 既存の文書を、伝わるように直す | 症状を確かめてから規模判定 |
 | 誤りの修正 | 事実が違うと分かっている | どこが・何と違うかを確かめてから規模判定 |
-| テイスト変更 | 事実と構成を変えず、文体・表記・見た目だけを変える | 規模判定。**前提や用語の説明を足さないと読者に届かないなら、改訂として扱う** |
+| テイスト変更 | 事実と構成を変えず、文体・表記・見た目だけを変える | 規模判定（1本なら M、2本以上なら L）。規模によらず試作から始める。**前提や用語の説明を足さないと読者に届かないなら、改訂として扱う** |
 | 方針変更 | 読者・扱わないこと・事実の承認者・読者向けの改訂履歴の有無を変える | `/harness-doc:change-policy` へ渡して終える |
 | 点検だけ | 読者役のレビューだけを頼まれた | `doc-reviewer` を起動して終える |
 
@@ -126,7 +128,7 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" --clear
 
 - **AI が推測し、依頼者が承認する。迷ったら上の規模で出す**（AI は楽な方に倒れやすい）
 - **規模の承認は、前提の提示と1回の問いにまとめる。** ブリーフの `missing` が挙げた「欠けている項目」「仮定の項目」も同じ問いで聞く。
-  **ただし S では、その修正に要る項目だけを聞く**（ほとんどの場合は聞かない。読者向けの改訂履歴の有無が欠けているときだけ聞く、のように）。M・L で項目が4つを超えるなら、案を表で示して承認か修正をもらう形にする（`AskUserQuestion` は1回4問まで）
+  **ただし L では聞かず、Stage 1 で案を作って承認の問いにまとめる**（二重に聞かない）。**S では、その修正に要る項目だけを聞く**（ほとんどの場合は聞かない。読者向けの改訂履歴の有無が欠けているときだけ聞く、のように）。M・L で項目が4つを超えるなら、案を表で示して承認か修正をもらう形にする（`AskUserQuestion` は1回4問まで）
 
 ```text
 この依頼は「誤りの修正・規模 S」と判断しました（1本・見出しは変えない・直す事実は手順3の1か所）。
@@ -145,10 +147,10 @@ node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" --clear
 | 規模と性質 | 経路 | 読むもの |
 |---|---|---|
 | S | このスキルの中で最後まで進める | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path S` |
-| M・L の新規作成・改訂・誤りの修正 | 改訂設計書を作って承認を取り、`/harness-doc:manual-writer` に渡す | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path M` |
-| M・L のテイスト変更 | `/harness-doc:change-tone` に渡す（規模・承認した前提・症状・経緯の要点を添える） | — |
+| M の新規作成・改訂・誤りの修正 | 改訂設計書を作って承認を取り、`/harness-doc:manual-writer` に渡す | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path M` |
+| L の新規作成・改訂・誤りの修正 | 改訂設計書・Stage 1・試作の承認を取り、`/harness-doc:manual-writer` に渡す | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path L` |
+| テイスト変更（M・L） | 改訂設計書と試作の承認を取り、`/harness-doc:change-tone` に渡す | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path tone` |
 
-> 規模 L の Stage 1（目次の段階の読者役の点検）と試作、テイスト変更を試作から始める形は、次の版で入る。いまは L も M の経路（改訂設計書）を通す。
 
 **経路を読まずに進めない。** 同じセッションで前に読んだことがあっても、依頼ごとに読み直す（実地検証で、続けての依頼では手順を覚えている範囲で進め、記録が抜けた）。
 

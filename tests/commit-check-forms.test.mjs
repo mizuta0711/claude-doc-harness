@@ -99,3 +99,11 @@ test("G2: skip の理由は「改訂の記録なしでコミットする: <理�
   assert.match(r.lines.join("\n"), /改訂の記録なしでコミットする: <理由>/);
   assert.equal(bash(dir, `git commit -m "doc-record: skip（改訂の記録なしでコミットする: ツールが直した）" -- ${DOC}`), "ask");
 });
+
+test("R1: 試作のファイルをコミットに入れると止める", () => {
+  const dir = repo();
+  fs.writeFileSync(path.join(dir, "docs", "usage", "phone.proto-1.md"), "# 試作\n");
+  const r = run({ tool_name: "Bash", tool_input: { command: `git add docs/usage/phone.proto-1.md && git commit -m x` }, cwd: dir });
+  assert.equal(r.decision, "deny");
+  assert.match(r.lines.join("\n"), /試作のファイルがコミットに入っている/);
+});

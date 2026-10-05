@@ -22,7 +22,7 @@ Claude Code でマニュアル・手順書・仕様書を**同じ水準で再現
 | フック | `check-docs` | Markdown（`.md`）か HTML（`.html`）を書くたびに曖昧語・必須見出し・コードブロックの言語指定・用語集との表記ゆれ・リンク切れを検査する。違反は Claude に差し戻す |
 | フック | `commit-check` | Claude が `git commit` するとき、コミットの中身を再現して、文書の改訂の記録があるかを確かめる。無ければ止める（`doc-record: skip（理由）` は利用者の承認を求める）。設定 `completeCheck` で警告だけにも、切ることもできる |
 | フック | `reviewer-guard` | 読者役（`doc-reviewer`）が、内部の改訂記録と改訂設計書を読むのを止める（書き手の意図を知ると追認になるため） |
-| スキル | `/harness-doc:change-tone` | 既存の文書のテイスト（文体・表記・HTML の見た目）を変える。見本で合意してから、事実と構成は変えずに書き換える |
+| スキル | `/harness-doc:change-tone` | 既存の文書のテイスト（文体・表記・HTML の見た目）を、事実と構成は変えずに書き換える（`plan-doc` から使う。`plan-doc` が試作で合意を取ってから渡す） |
 | スキル | `/harness-doc:change-policy` | 文書群の決め事（読者・扱わないこと・事実の承認者・読者向けの改訂履歴の有無）を変える。変えた決め事に合わなくなる文書を一覧にし、直し方を振り分ける（`plan-doc` から使う） |
 | スキル | `/harness-doc:setup-project` | 今のプロジェクトへ**対話で**導入する。既存の文書があれば文体・用語表・見た目を読み取って踏襲し、新規なら見本の文から選んでもらう。`CLAUDE.md` の文書ルールの節・`docs-style/`（用語集・曖昧語リスト・使い方）・`.claude/doc-harness.config.json` と、文書群ごとの読者・扱わないことを残すブリーフ（`.claude/rules/doc-brief-*.md`）を置く。原本は `plugins/harness-doc/scaffold/` |
 

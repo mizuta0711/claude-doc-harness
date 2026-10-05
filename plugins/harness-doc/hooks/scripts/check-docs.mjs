@@ -526,6 +526,11 @@ export function isHtmlPath(p) {
   return /\.html?$/i.test(String(p));
 }
 
+/** 試作のファイル（<元の名前>.proto-N.<拡張子>。plan-doc の L・テイスト変更が作り、承認の後に消す） */
+export function isProto(p) {
+  return /\.proto-\d+\.[^./\\]+$/i.test(String(p));
+}
+
 /** 改行だけを残して、ほかの文字を消す（行番号を保つ） */
 const keepNewlines = (s) => s.replace(/[^\n]/g, "");
 /** 改行以外を空白にする（文字位置も保つ） */
@@ -707,6 +712,7 @@ export function formatIssues(relPath, issues) {
 export function checkFile(absPath, dir, config, style) {
   const html = isHtmlPath(absPath);
   if (!html && !/\.md$/i.test(absPath)) return null;
+  if (isProto(absPath)) return null; // 試作のファイル（plan-doc の L・テイスト変更）。承認の後に消すので検査しない
   const rel = toPosix(path.relative(dir, absPath));
   if (rel.startsWith("../") || path.isAbsolute(rel)) return null;
   const styleRel = toPosix(config.styleDir || "docs-style") + "/";

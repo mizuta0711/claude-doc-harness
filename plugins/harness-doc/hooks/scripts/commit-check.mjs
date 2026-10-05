@@ -32,7 +32,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { loadConfig, DEFAULT_CONFIG } from "./check-docs.mjs";
+import { loadConfig, DEFAULT_CONFIG, isProto } from "./check-docs.mjs";
 import { changedDocs, checkDoc, setGitContext, planStates } from "../../scripts/complete-doc.mjs";
 import { loadBriefs } from "../../scripts/brief.mjs";
 
@@ -377,6 +377,19 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
       base = "HEAD~1";
     }
     setGitContext({ indexFile: built.index, base });
+    // 試作のファイル（<名前>.proto-N.<拡張子>）は検査の対象外なので、そのままでは黙ってコミットされ公開物に混ざる（0.11.0 の査読 R1）
+    const hasHead = tryGit(root, ["rev-parse", "--verify", "HEAD"]) !== null;
+    const stagedNames = (
+      tryGit(root, ["diff", "--cached", ...(hasHead ? [base] : []), "--name-only", "--diff-filter=ACMR", "-z"], { ...process.env, GIT_INDEX_FILE: built.index }) || ""
+    )
+      .split("\0")
+      .filter(Boolean);
+    const protos = stagedNames.filter((f) => isProto(f));
+    if (protos.length)
+      return {
+        decision: mode === "warn" ? "warn" : "deny",
+        lines: [`試作のファイルがコミットに入っている: ${protos.join(", ")}。試作は承認の後に消す（見本は改訂設計書の「試作」の節に写す）。コミットから外す`],
+      };
     const targets = changedDocs(root, config, true);
     if (!targets.length) return { decision: "allow", lines: [] };
     const briefs = loadBriefs(root);

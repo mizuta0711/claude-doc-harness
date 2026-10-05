@@ -141,7 +141,7 @@ HTML では、バッククォートはただの文字でインラインコード
 | `revisionHeadings` | string[] | `["改訂履歴"]` | 読者向けの改訂履歴の節の見出し（`scripts/complete-doc.mjs` が探す）。既存のサイトが「更新履歴」なら `setup-project` が合わせる |
 | `plansDir` | string | `"docs-style/plans"` | 改訂設計書の置き場所（`plan-doc` が規模 M・L で作る。完了したら `<plansDir>/completed/` に移す）。`styleDir` の下に置けば、このフックの検査対象から外れる |
 | `completeCheck` | string | `"block"` | コミット時の検査（`hooks/scripts/commit-check.mjs`）。`"block"`（改訂の記録が無い文書を含むコミットを止める）/ `"warn"`（警告だけ）/ `"off"`（何もしない）。ブリーフが1つも無いプロジェクトは、`"block"` でも警告だけになる |
-| `voice.endings` | string | null | `null` | `keitai`（です・ます）/ `jotai`（だ・である）/ `null`（検査しない）。`setup-project` と `change-tone` が `docs-style/voice.md` と揃えて書く。**文書群ごとに文末が違う**（ブリーフの「文体の差分」で一部の文書群だけ文末を変えた）ときは `null` にする（この検査はプロジェクト全体に一律で効くため） |
+| `voice.endings` | string | null | `null` | `keitai`（です・ます）/ `jotai`（だ・である）/ `null`（検査しない）。`setup-project` と、テイスト変更の完了処理（plan-doc の finish の 3-1）が `docs-style/voice.md` と揃えて書く。テイスト変更で文末を変えるあいだは、書き換えの前に `null` にして、採用が決まってから新しい値を書く。**文書群ごとに文末が違う**（ブリーフの「文体の差分」で一部の文書群だけ文末を変えた）ときは `null` にする（この検査はプロジェクト全体に一律で効くため） |
 | `rules.imageAlt` / `rules.headingSkip` / `rules.linkText` / `rules.htmlLang` | boolean | すべて `true` | 検査 8 を個別に止める。見出しの飛びを意図して使っているプロジェクトは `headingSkip` を `false` にする |
 | `rules.anchors` | boolean | `true` | 検査 5-2（アンカー切れ）を止める。見出しからアンカーを作る規則が GitHub と違う描画（MkDocs・Docusaurus のような静的サイト生成で、設定によって違う）を使う場合は `false` にする |
 

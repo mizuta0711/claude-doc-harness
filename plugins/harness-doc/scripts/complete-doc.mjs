@@ -42,7 +42,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { loadConfig, matchesAny, toPosix, isHtmlPath, DEFAULT_CONFIG, checkDocument, loadStyle } from "../hooks/scripts/check-docs.mjs";
+import { loadConfig, matchesAny, toPosix, isHtmlPath, isProto, DEFAULT_CONFIG, checkDocument, loadStyle } from "../hooks/scripts/check-docs.mjs";
 import { loadBriefs, resolveBrief } from "./brief.mjs";
 import { historyFile, historyDir, parseSections, mentions } from "./history.mjs";
 
@@ -240,6 +240,7 @@ export function changedDocs(dest, config, staged) {
   return [...names].filter(
     (rel) =>
       (isHtmlPath(rel) || /\.md$/i.test(rel)) &&
+      !isProto(rel) &&
       !rel.startsWith(styleRel) &&
       !rel.startsWith(historyRel) &&
       !rel.startsWith(plansRel) &&
@@ -440,6 +441,18 @@ export function diffSections(oldSections, nowSections) {
   return { added, rewritten: gone.length > 0, copied: [], gone };
 }
 
+/** プロジェクトの中の試作のファイル（追跡しているものと、無視されていない追跡外のもの） */
+export function protoFiles(dest) {
+  try {
+    return git(dest, ["ls-files", "-co", "--exclude-standard", "-z"])
+      .split("\0")
+      .filter((f) => f && isProto(f) && fs.existsSync(path.join(dest, f)))
+      .map(toPosix);
+  } catch {
+    return [];
+  }
+}
+
 /** 内部の改訂記録の節の規模（見出しの「規模 M」）。無ければ null */
 const sizeOf = (s) => (s.heading.match(/規模\s*([SML])/) || [])[1] || null;
 
@@ -483,11 +496,16 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
     );
   if (diff.copied.length)
     warnings.push(`内部の改訂記録（${hFile}）に、過去の節と同じ中身の節が足されている（写しは今回の記録として数えない）: ${diff.copied.map((s) => `「${s.heading}」`).join("・")}`);
-  // 改訂設計書: 規模 M・L の改訂には要る（テイスト変更は 0.11.0 まで対象外）。未チェックの基準・タスクと、前後確認の空を止める
+  // 試作のファイル（<元の名前>.proto-N.<拡張子>）が残っていたら止める。承認の後に消す決まりで、残すと公開物に混ざる
+  // 文書の隣だけでなくプロジェクト全体を探す（試作の CSS は文書と別のフォルダーにある。0.11.0 の査読 R2）
+  if (!staged) {
+    const left = protoFiles(dest);
+    if (left.length) problems.push(`試作のファイルが残っている: ${left.join(", ")}（見本を改訂設計書の「試作」の節に写してから消す）`);
+  }
+  // 改訂設計書: 規模 M・L の改訂（テイスト変更を含む）には要る。未チェックの基準・タスクと、前後確認の空を止める
   for (const s of added) {
     const size = sizeOf(s);
     if (size !== "M" && size !== "L") continue;
-    if (/テイスト変更/.test(s.heading)) continue;
     const ref = String(s.items["改訂設計書"] || "").replace(/`/g, "").trim();
     if (!ref || /^なし/.test(ref)) {
       problems.push(`規模 ${size} の改訂なのに、内部の改訂記録に改訂設計書のパスが無い（plan-doc の M・L の経路で改訂設計書を作る）`);
