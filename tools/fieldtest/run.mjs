@@ -3,7 +3,7 @@
  * 実地検証の実行役。写しのプロジェクトで Claude Code のセッションを開き、シナリオの依頼を順に入力し、
  * Claude が依頼者に出す問い（AskUserQuestion）にシナリオの規則で答える。
  *
- *   node run.mjs scenarios/p3b.mjs [--out <ログのフォルダー>] [--from <手順の id>]
+ *   node run.mjs scenarios/p3b.mjs [--out <ログのフォルダー>] [--from <手順の id>] [--plugin <手元のプラグインのフォルダー>]
  *
  * - 許可を省くモード（依頼者のふだんの運用）で、インストール済みのプラグイン・フック・CLAUDE.md を読み込む
  * - 1つのセッションで続ける（2つ目からは resume）
@@ -73,6 +73,7 @@ const canUseTool = async (toolName, input) => {
 
 let sessionId = opt("--resume");
 const from = opt("--from");
+const localPlugin = opt("--plugin") ? path.resolve(opt("--plugin")) : null;
 let started = !from;
 for (const step of scenario.steps) {
   if (!started && step.id !== from) continue;
@@ -86,6 +87,10 @@ for (const step of scenario.steps) {
       cwd: scenario.cwd,
       permissionMode: "bypassPermissions",
       settingSources: ["user", "project", "local"],
+      // --plugin <フォルダー>: push の前の手元のプラグインで確かめる。インストール済みの harness-doc は切る（フックが二重に走らないように）
+      ...(localPlugin
+        ? { plugins: [{ type: "local", path: localPlugin }], settings: { enabledPlugins: { "harness-doc@doc-harness": false } } }
+        : {}),
       canUseTool,
       ...(sessionId ? { resume: sessionId } : {}),
     },
@@ -93,6 +98,8 @@ for (const step of scenario.steps) {
     if (m.type === "system" && m.subtype === "init" && !sessionId) {
       sessionId = m.session_id;
       say(`セッション: ${sessionId}`);
+      // --plugin のときに、インストール済みの版が切れているかを確かめられるように
+      say(`プラグイン: ${(m.plugins || []).map((p) => `${p.name}（${p.path}）`).join(" / ") || "なし"}`);
       fs.writeFileSync(path.join(out, "session.txt"), sessionId + "\n");
     }
     if (m.type === "result") {

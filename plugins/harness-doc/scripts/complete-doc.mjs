@@ -42,7 +42,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { loadConfig, matchesAny, toPosix, isHtmlPath, isProto, DEFAULT_CONFIG, checkDocument, loadStyle } from "../hooks/scripts/check-docs.mjs";
+import { loadConfig, matchesAny, toPosix, isHtmlPath, isProto, DEFAULT_CONFIG, checkDocument, loadStyle, diffIssues } from "../hooks/scripts/check-docs.mjs";
 import { loadBriefs, resolveBrief } from "./brief.mjs";
 import { historyFile, historyDir, parseSections, mentions } from "./history.mjs";
 
@@ -312,16 +312,6 @@ function dataRows(section, html) {
   return [...table, ...list].filter(real).length;
 }
 
-/** check-docs の指摘を、行番号を除いた「種類と文言」の多重集合にする（作業前と比べて増えた分だけを見るため） */
-function issueKeys(issues) {
-  const m = new Map();
-  for (const i of issues) {
-    const k = `${i.kind}\u0000${i.message}`;
-    m.set(k, (m.get(k) || 0) + 1);
-  }
-  return m;
-}
-
 // ---------------------------------------------------------------------------
 // 改訂設計書（plan-doc が M・L で作る。docs-style/plans/YYYYMMDD_<名前>.md）
 // ---------------------------------------------------------------------------
@@ -459,6 +449,9 @@ const sizeOf = (s) => (s.heading.match(/規模\s*([SML])/) || [])[1] || null;
 const QUERY_MARK = /<!--\s*問い合わせ\s*[:：]/;
 
 /** 1本の文書を検査する。戻り値: { rel, problems: [], warnings: [] } */
+/** check-docs の指摘が増えたときの問題の書き出し。コミット時の検査が、記録の問題と分けるために使う（skip で通さない） */
+export const CHECK_DOCS_NG = "check-docs の指摘が";
+
 export function checkDoc(dest, rel, { staged = false, allowQueries = false, briefs, config = {}, baseline = null, style = null, strict = false } = {}) {
   const problems = [];
   const warnings = [];
@@ -550,15 +543,15 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
   // 4. check-docs の指摘が作業前より増えていないか（Bash で書き換えるとフックが働かないので、ここで捕まえる）
   if (style) {
     const abs = path.join(dest, rel);
-    const nowIssues = issueKeys(checkDocument(now, { filePath: abs, config, style, format: html ? "html" : "md" }));
+    // 数え方はフックと同じ（check-docs の diffIssues）。ただしリンク切れも比べる（フックだけが毎回止める）。
+    // 比べないと、前からあるリンク切れで関係の無い修正の完了とコミットが止まる。リンク先を消したときのリンク切れは、
+    // 前の版でも今の配置で判定されるので、ここでは捕まえられない（既知の制限。その文書を次に書いたときにフックが止める）
+    const nowIssues = checkDocument(now, { filePath: abs, config, style, format: html ? "html" : "md" });
     const prev = before(dest, rel);
-    const oldIssues = prev ? issueKeys(checkDocument(prev, { filePath: abs, config, style, format: html ? "html" : "md" })) : new Map();
-    const added = [];
-    for (const [k, n] of nowIssues) {
-      const extra = n - (oldIssues.get(k) || 0);
-      if (extra > 0) added.push(`${k.split("\u0000")[1]}${extra > 1 ? `（${extra}件）` : ""}`);
-    }
-    if (added.length) problems.push(`check-docs の指摘が作業前より増えている: ${added.slice(0, 5).join(" / ")}${added.length > 5 ? " ほか" : ""}`);
+    const oldIssues = prev ? checkDocument(prev, { filePath: abs, config, style, format: html ? "html" : "md" }) : [];
+    const added = diffIssues(nowIssues, oldIssues, { always: new Set() }).groups.map((g) => `${g.message}${g.extra > 1 ? `（${g.extra}件）` : ""}`);
+    if (added.length)
+      problems.push(`${CHECK_DOCS_NG}${staged ? "直前のコミット" : "作業前"}より増えている: ${added.slice(0, 5).join(" / ")}${added.length > 5 ? " ほか" : ""}`);
   }
   // 抑止のマーカーを足して検査をすり抜けていないか
   const markers = (s) => (String(s).match(/<!--\s*check-docs:\s*(skip|ignore)\b/g) || []).length;

@@ -32,8 +32,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { loadConfig, DEFAULT_CONFIG, isProto } from "./check-docs.mjs";
-import { changedDocs, checkDoc, setGitContext, planStates } from "../../scripts/complete-doc.mjs";
+import { loadConfig, DEFAULT_CONFIG, isProto, loadStyle } from "./check-docs.mjs";
+import { changedDocs, checkDoc, setGitContext, planStates, CHECK_DOCS_NG } from "../../scripts/complete-doc.mjs";
 import { loadBriefs } from "../../scripts/brief.mjs";
 
 const require = createRequire(import.meta.url);
@@ -425,21 +425,41 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
     const plans = planStates(root, config, { staged: true });
     const working = plans.filter((p) => p.state === "作業中" && p.inCommit);
     const ng = [];
+    const docsNg = [];
     const warn = [];
+    // check-docs の指摘が直前のコミットより増えていないかも見る（0.12.0）。書くたびのフックは増えた指摘だけを止めるが、
+    // PostToolUse なので止めても書き込みは済んでいる。直さずにコミットが通ると、以後「前からある」になってしまう
+    const style = loadStyle(root, config);
     for (const rel of targets) {
       // フックの時間切れは素通りになるので、予算を超えたら止める（文書の多いコミット。査読 P3）
       if (Date.now() > deadline) return { decision: mode === "warn" ? "warn" : "deny", lines: ["検査が時間内に終わらなかった。文書を分けてコミットする"] };
       // 問い合わせの印は警告にとどめる。印は改訂設計書の「問い合わせ」で管理していて、依頼者の回答を待つあいだ残るのが正しい状態。
       // 止めると、印を消して通すことになり、追跡が失われる（実地検証 P3b の G1）。完了報告の前の検査（complete-doc）は今どおり NG
-      const { problems, warnings } = checkDoc(root, rel, { staged: true, briefs, config, allowQueries: true });
+      const { problems, warnings } = checkDoc(root, rel, { staged: true, briefs, config, allowQueries: true, style });
       const plan = working.find((p) => p.docs.includes(rel));
       if (problems.length && plan) warn.push(`${rel}: 改訂設計書 ${plan.file} が作業中なので警告にとどめた — ${problems.join(" / ")}`);
-      else if (problems.length) ng.push(`${rel}: ${problems.join(" / ")}`);
+      else if (problems.length) {
+        // check-docs の指摘は記録の問題と分ける。記録の承認（doc-record: skip）で通してはいけない
+        const docs = problems.filter((p) => p.startsWith(CHECK_DOCS_NG));
+        const rest = problems.filter((p) => !p.startsWith(CHECK_DOCS_NG));
+        if (docs.length) docsNg.push(`${rel}: ${docs.join(" / ")}`);
+        if (rest.length) ng.push(`${rel}: ${rest.join(" / ")}`);
+      }
       for (const w of warnings) warn.push(`${rel}: ${w}`);
     }
     for (const p of plans) if (p.state === "作業中" && p.ageDays > 7) warn.push(`改訂設計書 ${p.file} が「作業中」のまま ${p.ageDays} 日たっている。終えたか、やめたかを確かめる`);
-    if (!ng.length) return { decision: warn.length ? "warn" : "allow", lines: warn };
-    if (mode === "warn") return { decision: "warn", lines: [...ng, ...warn] };
+    if (!ng.length && !docsNg.length) return { decision: warn.length ? "warn" : "allow", lines: warn };
+    if (mode === "warn") return { decision: "warn", lines: [...docsNg, ...ng, ...warn] };
+    if (docsNg.length)
+      return {
+        decision: "deny",
+        lines: [
+          ...docsNg,
+          "書いた文書の check-docs の指摘が、直前のコミットより増えている。指摘を直してからコミットする（doc-record: skip では通らない。前からある指摘は直さなくてよい）",
+          ...ng,
+          ...warn,
+        ],
+      };
     const skip = SKIP.exec(command);
     // 承認の画面にはフックの理由が出ず、コマンドの本文だけが出る（実地検証 P3a-3 の G2。systemMessage も出しているが表示されなかった）。
     // 何を承認するのかが本文から読めるよう、理由の書き方をここで決める（スキルの指示だと AI が飛ばせる）

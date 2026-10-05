@@ -22,7 +22,7 @@ allowed-tools: "Bash(node:*), Bash(ls:*), Bash(git status:*), Bash(git diff:*), 
 |---|---|
 | 完了処理の検査・前後の比べ | `node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" <文書...>`・`compare <文書...>` |
 | 完了前の確認と完了処理の手順 | `node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path finish` |
-| 検査 | `node "${CLAUDE_SKILL_DIR}/../../hooks/scripts/check-docs.mjs" <文書...>` |
+| 検査 | `node "${CLAUDE_SKILL_DIR}/../../hooks/scripts/check-docs.mjs" --changed <文書...>`（直前のコミットより増えた指摘だけで判定する。前からある指摘は直さない） |
 
 ## Step 0: 受け取るものを確かめる
 
@@ -63,7 +63,7 @@ plan-doc で記録済みでも、もう一度 `--mark` してよい（同じコ�
 
 1. **中身が変わっていないか。** `git diff` で全変更を読む。事実・数値・手順・画面名・コードが変わっていたら戻す。
    **これがこのスキルで最も大事な確認**（文章の変更は、壊れても検査で検出されない）。受け入れ基準の1つ目にチェックを付ける
-2. 検査を通す（`check-docs.mjs <書き換えた文書...>`）
+2. 検査を通す（`check-docs.mjs --changed <書き換えた文書...>`。前からある指摘は直さない。テイスト変更の範囲の外）
 3. `harness-doc:doc-reviewer` に、**承認した見本の調子に沿っているか**を点検してもらう（見本と比べる点検）。
    **点検する本数**: 1人で書き換えたなら代表の1本。並列のエージェントに分けて書き換えたなら、**まとまりごとに1本ずつ**（まとまりごとのずれは、代表の1本では見つからない）。
    渡すもの: 文書の絶対パス、試作の見本の文（改訂設計書の「試作」の節から**全文で貼る**。読者役は改訂設計書を読めない）、読者プロファイル。

@@ -13,6 +13,9 @@
  *
  * 違反があれば理由を stderr に出して終了コード 2 で終わる。
  * PostToolUse の終了コード 2 は「stderr を Claude に見せる」挙動で、Claude が直す。
+ * **フックは直前のコミット（HEAD）の中身と比べ、増えた指摘だけを止める**（0.12.0。前からある指摘は件数だけを
+ * additionalContext で伝える）。リンク切れと lint は比べずに毎回止める。前の版を読めなければ全部を止める。
+ * 曖昧語・用語集・文末は1行につき同じ語を1件しか出さないので、前からある違反と同じ行に同じ違反を足しても増えない（既知の制限）。
  *
  * 動作原則（dev-harness と同じ fail-open）:
  *   - `.claude/doc-harness.config.json` が無い → 素通り（ハーネス未導入のプロジェクトを止めない）
@@ -20,7 +23,8 @@
  *   - `docs-style/` のファイルが無い → その検査だけ飛ばす
  *
  * CLI としても使える（テスト・CI 向け）:
- *   node check-docs.mjs <file.md|file.html> [...]      指定ファイルを検査し、違反があれば終了コード 2
+ *   node check-docs.mjs <file.md|file.html> [...]      指定ファイルを検査し、違反があれば終了コード 2（全部の指摘）
+ *   node check-docs.mjs --changed <file> [...]        フックと同じく、直前のコミットより増えた指摘だけで判定する
  *
  * 依存パッケージは使わない（Node 標準ライブラリのみ）。
  */
@@ -161,6 +165,19 @@ export function parseBannedWords(text) {
 
 const PREFERRED_HEADER = /推奨|使う|✅|正しい/;
 const BANNED_HEADER = /禁止|使わない|❌|誤り|避ける/;
+const EXCEPT_HEADER = /^例外/;
+const EXCLUDE_HEADER = /除く/;
+const NONE_CELL = /^(—|-|–|なし)?$/;
+
+/** セルを語の並びに分ける（`、` `,` `/`）。`—` `-` `なし` 空は語なし */
+function termList(cell) {
+  return NONE_CELL.test(cell)
+    ? []
+    : cell
+        .split(/[、,/]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
 
 function splitRow(t) {
   return t
@@ -185,12 +202,16 @@ function cleanTerm(s) {
  * 見出しの無い表は「推奨 | 禁止 | 意味」の順とみなす（0.1.0 からの書式）。
  * 禁止表記は `、` `,` `/` で複数書ける。`—` `-` 空は「禁止表記なし」。
  * プロジェクトが既に持つ用語表（例: `.claude/rules/japanese-terms.md` の「対象 | 使う | 使わない」）もこれで読める。
- * 戻り値: [{ preferred, banned: [...] }]
+ * - 例外の列（任意）: 見出しが「例外」で始まる列。無ければ、「除く」を含み、推奨・禁止の語を含まない列。
+ *   推奨・禁止の列より先に決め、その列を除いてから推奨・禁止の列を探す（「例外（そのまま使う語）」を推奨の列と取り違えない）。
+ *   例外に書いた語の一部として禁止表記が現れたら検出しない（`ユーザ` の行に `ユーザビリティ`）。値のバッククォートは外して中身を残す
+ * 戻り値: [{ preferred, banned: [...], except?: [...] }]。except は例外の列がある表の行だけに付く。
+ * source（読み込み元。指摘のメッセージに出す）は列挙されないプロパティで持つ（deepEqual で比べるテストを壊さない）
  */
-export function parseGlossary(text) {
+export function parseGlossary(text, source = null) {
   const rows = [];
   const lines = String(text).split(/\r?\n/).map((l) => l.trim());
-  let cols = null; // 今の表の { pref, ban }。null なら既定の 0 / 1
+  let cols = null; // 今の表の { pref, ban, ex }。null なら既定の 0 / 1（例外の列なし）
   let inTable = false;
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i];
@@ -204,9 +225,21 @@ export function parseGlossary(text) {
     const isHeader = !inTable && /^\|\s*:?-{2,}/.test(next);
     inTable = true;
     if (isHeader) {
-      const pref = cells.findIndex((c) => PREFERRED_HEADER.test(c));
-      const ban = cells.findIndex((c) => BANNED_HEADER.test(c));
-      cols = pref >= 0 && ban >= 0 ? { pref, ban } : { skip: true };
+      // 例外の列: 見出しが「例外」で始まる列（「例外（そのまま使う語）」も。「禁止（例外あり）」は始まらないので当たらない）。
+      // 無ければ「除く」を含み、推奨・禁止の語を含まない列（「使わない（固有名詞を除く）」は禁止の列）
+      const plain = (c) => !PREFERRED_HEADER.test(c) && !BANNED_HEADER.test(c);
+      let ex = cells.findIndex((c) => EXCEPT_HEADER.test(c));
+      if (ex < 0) ex = cells.findIndex((c) => EXCLUDE_HEADER.test(c) && plain(c));
+      const find = (re, skip) => cells.findIndex((c, k) => k !== skip && re.test(c));
+      let pref = find(PREFERRED_HEADER, ex);
+      let ban = find(BANNED_HEADER, ex);
+      if (ex >= 0 && (pref < 0 || ban < 0)) {
+        // 例外の列を除くと推奨・禁止がそろわないなら、例外の列は無いものとして読み直す（既存の表を読めなくしない）
+        ex = -1;
+        pref = find(PREFERRED_HEADER, -1);
+        ban = find(BANNED_HEADER, -1);
+      }
+      cols = pref >= 0 && ban >= 0 ? { pref, ban, ex, width: cells.length } : { skip: true };
       i++; // 区切り行を飛ばす
       continue;
     }
@@ -218,13 +251,11 @@ export function parseGlossary(text) {
     const preferred = cleanTerm(cells[pref]);
     const bannedCell = cleanTerm(cells[ban]);
     if (!preferred) continue;
-    const banned = /^(—|-|–|なし)?$/.test(bannedCell)
-      ? []
-      : bannedCell
-          .split(/[、,/]/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-    rows.push({ preferred, banned });
+    const row = { preferred, banned: termList(bannedCell) };
+    // 列の数が見出しと違う行（例外の列を足す前の書式で書いた行）は、例外の列を読まない（意味の列を例外と取り違えない）
+    if (cols && cols.ex >= 0) row.except = cells.length === cols.width ? termList(String(cells[cols.ex] ?? "").replace(/`/g, "").trim()) : [];
+    Object.defineProperty(row, "source", { value: source, enumerable: false });
+    rows.push(row);
   }
   return rows;
 }
@@ -275,10 +306,9 @@ export function loadStyle(dir, config) {
   const glossary = read("glossary.md");
   // プロジェクトが既に持つ用語表（例: .claude/rules/japanese-terms.md）も読む
   const extra = (config.glossaryFiles || [])
-    .map((rel) => path.join(dir, rel))
-    .filter((f) => fs.existsSync(f))
-    .flatMap((f) => parseGlossary(fs.readFileSync(f, "utf-8")));
-  const parsed = glossary === null ? null : parseGlossary(glossary);
+    .filter((rel) => fs.existsSync(path.join(dir, rel)))
+    .flatMap((rel) => parseGlossary(fs.readFileSync(path.join(dir, rel), "utf-8"), toPosix(rel)));
+  const parsed = glossary === null ? null : parseGlossary(glossary, `${toPosix(config.styleDir || "docs-style")}/glossary.md`);
   return {
     styleDir,
     bannedWords: banned === null ? null : parseBannedWords(banned),
@@ -356,6 +386,18 @@ export function checkDocument(text, { filePath, config, style, format }) {
  * 曖昧語と用語集の検査（Markdown・HTML 共通）。
  * @param {Array<{no:number,text:string}>} lines  検査してよい本文だけを残した行
  */
+/** 行 t の位置 idx から len 文字が、例外の語のどれかの一部として現れているか */
+function insideException(t, idx, len, except) {
+  for (const e of except || []) {
+    let p = t.indexOf(e);
+    while (p !== -1 && p <= idx) {
+      if (idx + len <= p + e.length) return true;
+      p = t.indexOf(e, p + 1);
+    }
+  }
+  return false;
+}
+
 export function checkWords(lines, style) {
   const issues = [];
   const bannedWords = style?.bannedWords || [];
@@ -373,8 +415,12 @@ export function checkWords(lines, style) {
         while (idx !== -1) {
           // 禁止表記が推奨表記の先頭部分（例: サーバ / サーバー）なら、その位置は推奨表記として読む
           const isPrefixOfPreferred = row.preferred.startsWith(b) && t.startsWith(row.preferred, idx);
-          if (!isPrefixOfPreferred) {
-            issues.push({ line: l.no, kind: "glossary", message: `表記ゆれ「${b}」→「${row.preferred}」（用語集）` });
+          if (!isPrefixOfPreferred && !insideException(t, idx, b.length, row.except)) {
+            issues.push({
+              line: l.no,
+              kind: "glossary",
+              message: `表記ゆれ「${b}」→「${row.preferred}」（${row.source || "用語集"}）。この語を認めるなら、その表の「例外」の列に足す（列が無ければ足す）`,
+            });
             break;
           }
           idx = t.indexOf(b, idx + b.length);
@@ -730,6 +776,74 @@ export function checkFile(absPath, dir, config, style) {
 }
 
 // ---------------------------------------------------------------------------
+// 前からある指摘（直前のコミットの中身と比べる。DocumentTemplete background/08 の決定）
+// ---------------------------------------------------------------------------
+
+/** 比べずに毎回止める指摘。リンク切れは前の版でも今の配置で判定されるので「前からある」になってしまう。lint は前の中身を渡せない */
+const ALWAYS_REPORT = new Set(["link", "markdownlint", "textlint"]);
+
+/**
+ * 直前のコミット（HEAD）の中身。読めなければ null（git でない・コミットが無い・新しいファイル・リネームの後）。
+ * ファイルのフォルダーを起点にし、`./` を付ける（プロジェクトがリポジトリのサブフォルダーにあっても、入れ子のリポジトリでも読める）
+ */
+export function headText(absPath) {
+  const r = spawnSync("git", ["-C", path.dirname(absPath), "show", `HEAD:./${path.basename(absPath)}`], {
+    encoding: "utf-8",
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
+  return r.status === 0 && typeof r.stdout === "string" ? r.stdout : null;
+}
+
+/** 指摘を kind と message の組で数える（行番号を含まない） */
+export function issueKeys(issues) {
+  const m = new Map();
+  for (const i of issues) {
+    const k = `${i.kind}\u0000${i.message}`;
+    m.set(k, (m.get(k) || 0) + 1);
+  }
+  return m;
+}
+
+/**
+ * 今の指摘を、前の版の指摘と比べる。
+ * 戻り値: { added: [増えた組の今の指摘（組の行を全部）], groups: [{ message, total, extra }], kept: 前からある件数 }
+ * 件数で数えるので、増えた組のどの行が新しいかは決められない。組の行を全部返す
+ */
+export function diffIssues(now, prevIssues, { always = ALWAYS_REPORT } = {}) {
+  const old = issueKeys(prevIssues);
+  const nowKeys = issueKeys(now);
+  const addedKeys = new Map();
+  let kept = 0;
+  for (const [k, n] of nowKeys) {
+    const kind = k.split("\u0000")[0];
+    const extra = always.has(kind) ? n : Math.max(0, n - (old.get(k) || 0));
+    if (extra > 0) addedKeys.set(k, { total: n, extra, before: old.get(k) || 0 });
+    kept += n - extra;
+  }
+  const added = now.filter((i) => addedKeys.has(`${i.kind}\u0000${i.message}`));
+  const groups = [...addedKeys].map(([k, v]) => ({ kind: k.split("\u0000")[0], message: k.split("\u0000")[1], ...v }));
+  return { added, groups, kept };
+}
+
+/**
+ * フックと `--changed` の判定。result は checkFile の戻り値。
+ * 戻り値: { issues: 止める指摘, note: 末尾に添える行, kept: 前からある件数 }
+ */
+export function changedIssues(absPath, result, config, style) {
+  const prev = headText(absPath);
+  if (prev === null) return { issues: result.issues, note: "前の版（直前のコミット）を読めなかったので、全部の指摘を出した", kept: 0 };
+  const prevIssues = checkDocument(prev, { filePath: absPath, config, style });
+  const { added, groups, kept } = diffIssues(result.issues, prevIssues);
+  // 比べずに止める指摘（リンク切れ）が前の版にもあったなら、そう添える（範囲の外を直しに行くかを Claude が決められるように）
+  const preexisting = new Set(groups.filter((g) => ALWAYS_REPORT.has(g.kind) && g.before > 0).map((g) => `${g.kind}\u0000${g.message}`));
+  const issues = added.map((i) => (preexisting.has(`${i.kind}\u0000${i.message}`) ? { ...i, message: `${i.message}（直前のコミットにもある。リンク切れは前からあっても止める）` } : i));
+  const notes = groups.filter((g) => !ALWAYS_REPORT.has(g.kind) && g.total > g.extra).map((g) => `「${g.message}」は ${g.total} 件のうち ${g.extra} 件が増えた（どれが新しいかは決められないので全部出した）`);
+  if (kept) notes.push(`前からある指摘 ${kept} 件は止めていない（直前のコミットにもある。直す依頼のときに直す）`);
+  return { issues, note: notes.join("\n  "), kept };
+}
+
+// ---------------------------------------------------------------------------
 // エントリポイント
 // ---------------------------------------------------------------------------
 
@@ -748,11 +862,18 @@ function mainHook() {
   const result = checkFile(abs, dir, config, style);
   if (!result || result.issues.length === 0) process.exit(0);
 
-  process.stderr.write(formatIssues(result.rel, result.issues) + "\n");
+  const { issues, note, kept } = changedIssues(abs, result, config, style);
+  if (!issues.length) {
+    // 前からある指摘だけ: 止めずに Claude に伝える（PostToolUse の additionalContext）
+    const msg = `[check-docs] ${result.rel}: 前からある指摘 ${kept} 件（直前のコミットにもある。直す依頼のときに直す。今は直さなくてよい）`;
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: msg } }) + "\n");
+    process.exit(0);
+  }
+  process.stderr.write(formatIssues(result.rel, issues) + (note ? `\n  ${note}` : "") + "\n");
   process.exit(2);
 }
 
-function mainCli(files) {
+function mainCli(files, { changed = false } = {}) {
   const dir = projectDir();
   const { status, config } = loadConfig(dir);
   const effective = status === "ok" ? config : { ...DEFAULT_CONFIG, include: ["**/*.md", "**/*.html", "**/*.htm"], exclude: [] };
@@ -765,11 +886,14 @@ function mainCli(files) {
       process.stdout.write(`[check-docs] 対象外: ${toPosix(path.relative(dir, abs))}\n`);
       continue;
     }
-    if (result.issues.length) {
+    let issues = result.issues;
+    let note = "";
+    if (changed && issues.length) ({ issues, note } = changedIssues(abs, result, effective, style));
+    if (issues.length) {
       failed = true;
-      process.stderr.write(formatIssues(result.rel, result.issues) + "\n");
+      process.stderr.write(formatIssues(result.rel, issues) + (note ? `\n  ${note}` : "") + "\n");
     } else {
-      process.stdout.write(`[check-docs] OK: ${result.rel}\n`);
+      process.stdout.write(`[check-docs] OK: ${result.rel}${note ? `（${note}）` : ""}\n`);
     }
   }
   process.exit(failed ? 2 : 0);
@@ -778,6 +902,11 @@ function mainCli(files) {
 const isEntry = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isEntry) {
   const args = process.argv.slice(2);
-  if (args.length) mainCli(args);
-  else mainHook();
+  const changed = args.includes("--changed");
+  const files = args.filter((a) => a !== "--changed");
+  if (files.length) mainCli(files, { changed });
+  else if (changed) {
+    process.stderr.write("usage: node check-docs.mjs [--changed] <file.md|file.html> [...]\n");
+    process.exit(2);
+  } else mainHook();
 }
