@@ -144,6 +144,24 @@ function gitDirOf(seg, base, opts) {
   return dir;
 }
 
+/** 起点を指定しない新しいブランチの作成と切り替え（git switch -c <名前> / git checkout -b <名前>） */
+function isNewBranch(g, opts) {
+  const t = scope.tokenize(g.args, opts).map((x) => x.value);
+  const flag = g.sub === "switch" ? /^(-[cC]|--create|--force-create)$/ : g.sub === "checkout" ? /^-[bB]$/ : null;
+  if (!flag) return false;
+  // 許す形だけを列挙する（除外を列挙すると、起点の「-」（直前のブランチ）や -f（作業ツリーの変更を捨てる）を見落とした。0.11.1 の査読）
+  const harmless = /^(-q|--quiet|--no-track|--no-guess)$/;
+  let created = 0;
+  const names = [];
+  for (const x of t) {
+    if (flag.test(x)) created++;
+    else if (harmless.test(x)) continue;
+    else if (x.startsWith("-")) return false; // -f・--orphan・-t・--・- ほか、許していない引数
+    else names.push(x);
+  }
+  return created === 1 && names.length === 1; // 名前1つだけ（起点があれば中身が変わりうる）
+}
+
 /** 断片がファイルへ書き出すリダイレクトを持つか（`/dev/null`・`$null`・`NUL` だけなら持たない） */
 function writesFile(text) {
   const unquoted = text.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, '""');
@@ -216,6 +234,8 @@ export function readCommand(command, { shell = "bash", cwd }) {
       continue;
     }
     const gdir = gitDirOf(seg, dir, opts);
+    // 新しいブランチを作って切り替えるだけ（起点を指定しない `git switch -c x`・`git checkout -b x`）は、作業ツリーも index も変えない（P3b の G2）
+    if (!commits.length && isNewBranch(g, opts)) continue;
     if (!commits.length && !SAFE_GIT.has(g.sub)) {
       if (!gdir) return unsupported("git -C の行き先を決められない（変数・~ を含むか、実在しない）");
       dirs.push(gdir);
@@ -409,7 +429,9 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
     for (const rel of targets) {
       // フックの時間切れは素通りになるので、予算を超えたら止める（文書の多いコミット。査読 P3）
       if (Date.now() > deadline) return { decision: mode === "warn" ? "warn" : "deny", lines: ["検査が時間内に終わらなかった。文書を分けてコミットする"] };
-      const { problems, warnings } = checkDoc(root, rel, { staged: true, briefs, config });
+      // 問い合わせの印は警告にとどめる。印は改訂設計書の「問い合わせ」で管理していて、依頼者の回答を待つあいだ残るのが正しい状態。
+      // 止めると、印を消して通すことになり、追跡が失われる（実地検証 P3b の G1）。完了報告の前の検査（complete-doc）は今どおり NG
+      const { problems, warnings } = checkDoc(root, rel, { staged: true, briefs, config, allowQueries: true });
       const plan = working.find((p) => p.docs.includes(rel));
       if (problems.length && plan) warn.push(`${rel}: 改訂設計書 ${plan.file} が作業中なので警告にとどめた — ${problems.join(" / ")}`);
       else if (problems.length) ng.push(`${rel}: ${problems.join(" / ")}`);

@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { writeBrief } from "../plugins/harness-doc/scripts/brief.mjs";
+import { addSection } from "../plugins/harness-doc/scripts/history.mjs";
 import { run, stripHeredocs, readCommand } from "../plugins/harness-doc/hooks/scripts/commit-check.mjs";
 
 const DOC = "docs/usage/phone.md";
@@ -106,4 +107,37 @@ test("R1: 試作のファイルをコミットに入れると止める", () => {
   const r = run({ tool_name: "Bash", tool_input: { command: `git add docs/usage/phone.proto-1.md && git commit -m x` }, cwd: dir });
   assert.equal(r.decision, "deny");
   assert.match(r.lines.join("\n"), /試作のファイルがコミットに入っている/);
+});
+
+test("G1: 問い合わせの印が残っていても、コミット時は警告にとどめる（P3b）", () => {
+  const dir = repo();
+  fs.writeFileSync(path.join(dir, DOC), "# 電話\n\n1. 押す <!-- 問い合わせ: Q1 -->\n2. 話す\n");
+  addSection(dir, { doc: DOC, size: "S", 改訂箇所: "手順2", 改訂内容: "足した", 改訂意図: "抜けていた", 読者向けの改訂履歴: "対象外", "変更者・承認者": "Claude・依頼者" });
+  const r = run({ tool_name: "Bash", tool_input: { command: `git commit -m x -- ${DOC} docs-style/history/usage.md` }, cwd: dir });
+  assert.equal(r.decision, "warn", r.lines.join("\n"));
+  assert.match(r.lines.join("\n"), /問い合わせの印/);
+});
+
+test("G2: 起点を指定しない新しいブランチの作成は、commit の前にあってよい", () => {
+  const dir = repo();
+  assert.equal(bash(dir, `git switch -c work && git commit -m x -- ${DOC}`), "deny", "記録が無いので止まるが、再現できないからではない");
+  const r = run({ tool_name: "Bash", tool_input: { command: `git switch -c work && git commit -m x -- ${DOC}` }, cwd: dir });
+  assert.doesNotMatch(r.lines.join("\n"), /再現できない/);
+  const r2 = run({ tool_name: "Bash", tool_input: { command: `git checkout -b work2 main && git commit -m x -- ${DOC}` }, cwd: dir });
+  assert.match(r2.lines.join("\n"), /再現できない/, "起点があれば中身が変わりうる");
+});
+
+test("G2: 作業ツリーや起点を変える形は、新しいブランチの作成として扱わない（0.11.1 の査読）", () => {
+  const dir = repo();
+  for (const c of ["git switch -c y -", "git checkout -f -b y", "git checkout -b y -f", "git checkout -b y -- f", "git switch --orphan y", "git switch -c y -t origin/main", "git checkout -b y main"]) {
+    const r = readCommand(`${c} && git commit -m x`, { cwd: dir });
+    assert.ok(r.commits[0].ops.length > 0, c);
+  }
+  assert.equal(readCommand(`git switch -c y -q && git commit -m x`, { cwd: dir }).commits[0].ops.length, 0);
+});
+
+test("G1: 問い合わせの印があっても、記録の無い文書はコミット時に止める", () => {
+  const dir = repo();
+  fs.writeFileSync(path.join(dir, DOC), "# 電話\n\n1. 押す <!-- 問い合わせ: Q1 -->\n");
+  assert.equal(bash(dir, `git commit -m x -- ${DOC}`), "deny");
 });

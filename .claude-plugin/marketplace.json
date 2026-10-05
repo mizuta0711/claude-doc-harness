@@ -8,7 +8,7 @@
     {
       "name": "harness-doc",
       "source": "./plugins/harness-doc",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "description": "ドキュメント作成ハーネス（setup-project / plan-doc / manual-writer / change-tone / change-policy スキル・doc-reviewer エージェント・check-docs フック）。プロジェクト側の docs-style/・.claude/doc-harness.config.json・文書群ごとのブリーフ（.claude/rules/doc-brief-*.md）を契約として動作する"
     }
   ]
