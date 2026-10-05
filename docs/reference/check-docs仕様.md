@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 対応ハーネス版 | harness-doc 0.10.0 |
+| 対応ハーネス版 | harness-doc 0.11.2 |
 | 実装 | `plugins/harness-doc/hooks/scripts/check-docs.mjs` |
 | 検査 | `tests/check-docs.test.mjs`・`tests/check-docs-html.test.mjs` |
 
@@ -66,6 +66,8 @@ node plugins/harness-doc/hooks/scripts/check-docs.mjs docs/guide/a.md docs/guide
 | プロジェクトルート配下 | 同上 |
 | `styleDir`（既定 `docs-style/`）の外 | 同上 |
 | `.claude/` の外（ブリーフ `.claude/rules/doc-brief-*.md` や設定は文書ではない） | 同上 |
+| `historyDir`（既定 `docs-style/history/`）と `plansDir`（既定 `docs-style/plans/`）の外。`styleDir` の外に置き換えても、この2つは別に外す | 同上 |
+| 試作のファイルでない（名前が `<元の名前>.proto-<数字>.<拡張子>`。plan-doc の L・テイスト変更が作り、承認の後に消す） | `isProto` |
 | `include` のいずれかに一致 | `matchesAny` |
 | `exclude` のどれにも一致しない | 同上 |
 

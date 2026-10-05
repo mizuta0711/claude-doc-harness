@@ -1,6 +1,6 @@
 ---
 name: setup-project
-description: 今開いているプロジェクトに文書ハーネス（harness-doc）を対話で導入する。新規か既存かを見分け、既存なら今の文書の置き場所・文体・用語表・見た目（CSS）を読み取って踏襲する案を、新規なら見本の文から文体と見た目を選んでもらう。CLAUDE.md の文書ルールの節・docs-style/（用語集・曖昧語リスト・voice.md・使い方）・.claude/doc-harness.config.json と、文書群ごとの読者・扱わないことを残すブリーフ（.claude/rules/doc-brief-*.md）を置く。導入済みのプロジェクトには、足りないもの（ブリーフ・内部の改訂記録・CLAUDE.md の節の最新版）だけを足す。claude-dev-harness 導入済みなら設計書・機能設計書・レビュー記録・引き継ぎを検査対象から外す。「このプロジェクトに文書ハーネスを入れて」「マニュアル作成の準備をして」の入口。manual-writer が設定不在を検出したときにも使う。
+description: 今開いているプロジェクトに文書ハーネス（harness-doc）を対話で導入する。新規か既存かを見分け、既存なら今の文書の置き場所・文体・用語表・見た目（CSS）を読み取って踏襲する案を、新規なら見本の文から文体と見た目を選んでもらう。CLAUDE.md の文書ルールの節・docs-style/（用語集・曖昧語リスト・voice.md・使い方）・.claude/doc-harness.config.json と、文書群ごとの読者・扱わないことを残すブリーフ（.claude/rules/doc-brief-*.md）を置く。導入済みのプロジェクトには、足りないもの（ブリーフ・内部の改訂記録・CLAUDE.md の節の最新版）だけを足す。claude-dev-harness 導入済みなら設計書・機能設計書・レビュー記録・引き継ぎを検査対象から外す。「このプロジェクトに文書ハーネスを入れて」「マニュアル作成の準備をして」の入口。plan-doc（と manual-writer）が設定不在を検出したときにも使う。
 argument-hint: "[導入先のパス（省略時は今のプロジェクト）]"
 allowed-tools: "Bash(node:*), Bash(ls:*), Bash(git status:*), Read, Glob, Grep, Edit, Write, AskUserQuestion"
 ---
@@ -46,7 +46,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 
 | 結果 | 次 |
 |---|---|
-| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** 次のどれかに当たれば、**「導入済みのプロジェクトに足す」**（下の節）を行う。(1) ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無い（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list`）。(2) `CLAUDE.md` の「文書ルール（harness-doc）」の節が最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）と違う。(3) ブリーフの文書群に、内部の改訂記録（`docs-style/history/<名前>.md`）が無い。どれにも当たらなければ、文体を変えたいなら `plan-doc`（テイスト変更）、読者や範囲を変えたいなら `change-policy` を案内して終える |
+| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** 次のどれかに当たれば、**「導入済みのプロジェクトに足す」**（下の節）を行う。(1) ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無い（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list`）。(2) `CLAUDE.md` の「文書ルール（harness-doc）」の節が最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）と違う。(3) ブリーフの文書群に、内部の改訂記録（`docs-style/history/<名前>.md`）が無い。どれにも当たらなければ、文体を変えたいなら `plan-doc`（テイスト変更）、読者や範囲を変えたいなら `plan-doc`（方針変更として `change-policy` に渡る）を案内して終える |
 | `existing: true`（利用者向けの文書の候補がある） | Step 2A（既存） |
 | `existing: false` | Step 2B（新規） |
 
@@ -138,7 +138,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 
 ## 導入済みのプロジェクトに足す
 
-0.6.0 以前に導入したプロジェクトには、ブリーフも内部の改訂記録も無く、`CLAUDE.md` の節も古い。**導入はやり直さず、足りないものだけを足す。**
+0.6.0 以前に導入したプロジェクトにはブリーフが、0.7.0 以前なら内部の改訂記録が無く、`CLAUDE.md` の節も古い。**導入はやり直さず、足りないものだけを足す。**
 
 1. `.claude/doc-harness.config.json` の `include` と、その場所の文書を2〜3本読み、Step 2C の案を作る
 2. `CLAUDE.md` の「文書ルール（harness-doc）」の節と、最新版の節（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）を比べる。
