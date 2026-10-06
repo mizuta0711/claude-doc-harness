@@ -19,7 +19,7 @@
  *   改訂履歴の行で、今の作業が記録を残していなくても合格してしまう（実地検証 P3a の F2）。
  *   基準点が無く、内部の改訂記録にコミットしていない変更があるとき（記録を足していれば必ず当たる）は「判定できない」で NG にする。
  *   基準点は git のフォルダーの中（.git/harness-doc/baseline.json）に置くので、コミットされない。
- *   同じコミットの上で既に基準点があれば、--mark は上書きせずに足す（--reset で作り直す）。
+ *   同じ作業の上で既に基準点があれば（後のコミットが基準点のファイルに触れていなければ同じ作業。sameWork）、--mark は上書きせずに足す（--reset で作り直す）。
  *   すべて通り、基準点から変わった文書をすべて検査し終えたら「通過済み」の印を付ける（消さない。検査し直しても同じ結果になるように）。
  *   通過済みの基準点は、その後に何か変わっていれば使わない（次の作業）。次の --mark で作り直す。--clear で消す。
  *
@@ -113,6 +113,23 @@ function baselineCommitsNote(dest, baseline, advice) {
   return `[complete-doc] 警告: 基準点（${baseline.createdAt} に記録）の後に、基準点の文書・改訂記録に触れたコミットがある${list}。${advice}`;
 }
 
+/**
+ * 基準点を記録したときと同じ作業の上にいるか。HEAD が同じか、HEAD が基準点の子孫で、基準点の後のコミットがどれも
+ * 基準点のファイルに触れていない（別のセッションの作業のコミット）とき。ブランチの切り替え・reset の後は別の作業とみなす
+ * （0.14.0 の査読 R17: 別の作業のコミットの後の --mark が、基準点に足さずに作り直していた）
+ */
+function sameWork(dest, baseline, head) {
+  if (baseline.head === head) return true;
+  if (!baseline.head) return false;
+  try {
+    git(dest, ["merge-base", "--is-ancestor", baseline.head, "HEAD"]);
+  } catch {
+    return false;
+  }
+  const c = commitsAfterBaseline(dest, baseline);
+  return !!c && c.count > 0 && c.touching.length === 0;
+}
+
 function headOf(dest) {
   try {
     return git(dest, ["rev-parse", "HEAD"]).trim();
@@ -128,7 +145,7 @@ function headOf(dest) {
  *   - いま最後のコミットから変わっている文書（前の作業で直してコミットしていない文書。引数なしの検査で、今回の変更と区別するため）
  * 既に基準点があり、次のすべてに当たるときだけ、記録済みのファイルは上書きせずに足す（plan-doc で記録した後に
  * manual-writer へ渡ったとき、直した後の中身が「作業前」にならないように）:
- *   同じコミットの上で記録した・まだ検査を通っていない（通過済みの印が無い）・内部の改訂記録が記録のときから変わっていない
+ *   同じ作業の上で記録した（`sameWork`）・まだ検査を通っていない（通過済みの印が無い）・内部の改訂記録が記録のときから変わっていない
  *   （記録が変わっていれば、前の作業が記録まで進んで終わっている。足すと、前の作業の記録で次の作業が通ってしまう）
  * `--add` は、通過済みでなければ足す。作り直すときは reset
  */
@@ -148,7 +165,7 @@ export function markBaseline(dest, docs = [], { add = false, reset = false, conf
     Object.keys(b.files)
       .filter((k) => k.startsWith(hPrefix))
       .every((k) => readOrNull(dest, k) === b.files[k]);
-  const merge = !!cur && !reset && !cur.passed && (add || (!!head && cur.head === head && historyUnchanged(cur)));
+  const merge = !!cur && !reset && !cur.passed && (add || (!!head && sameWork(dest, cur, head) && historyUnchanged(cur)));
   const base = merge ? cur : { createdAt: new Date().toISOString(), head, files: {} };
   const put = (rel) => {
     if (!hasOwn(base.files, rel)) base.files[rel] = readOrNull(dest, rel);
@@ -925,7 +942,7 @@ function main() {
     else
       say(
         `[complete-doc] 作業前の基準点を記録した（${r.count}ファイル）。完了処理の検査は、この時点と比べる` +
-          (r.replaced ? "（前の基準点は、その後にコミットがあったので作り直した）" : "")
+          (r.replaced ? "。前の基準点は別の作業のものとみなして作り直した（基準点の文書に触れたコミット・ブランチの切り替え・通過済み・改訂記録の変化のどれか）" : "")
       );
     process.exit(0);
   }

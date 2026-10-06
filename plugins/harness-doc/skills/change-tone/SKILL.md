@@ -35,7 +35,7 @@ allowed-tools: "Bash(node:*), Bash(ls:*), Bash(git status:*), Bash(git diff:*), 
 node "${CLAUDE_SKILL_DIR}/../../scripts/complete-doc.mjs" --mark <書き換える文書...>
 ```
 
-plan-doc で記録済みでも、もう一度 `--mark` してよい（同じコミットの上で、まだ記録を書いていなければ上書きせずに足す）。
+plan-doc で記録済みでも、もう一度 `--mark` してよい（同じ作業の上で、まだ記録を書いていなければ上書きせずに足す。後に別の作業のコミットがあっても、基準点の文書・改訂記録に触れていなければ同じ作業とみなす）。
 
 文末を変えるときは、plan-doc が書き換えの前に文末の検査（`voice.endings`）を止めているはず（`show.mjs path tone` の 4-2）。止めていなければ、ここで止める（改訂方針に今の値を書いてから `apply.mjs --config '{"voice":{"endings":null}}'`）。止めないと、書き換えのたびに `check-docs` が新しい文末を止める。
 

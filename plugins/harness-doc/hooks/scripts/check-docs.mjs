@@ -40,7 +40,9 @@ const CONFIG_RELATIVE_PATH = path.join(".claude", "doc-harness.config.json");
 /** 文書種別ごとの必須見出し（config の requiredHeadings で上書きできる） */
 export const DEFAULT_REQUIRED_HEADINGS = {
   howto: ["できること", "前提条件", "手順", "確認", "うまくいかない場合"],
-  reference: ["できること", "前提条件", "一覧"],
+  // リファレンスは引くための文書なので「一覧」だけを要る見出しにする。「できること」「前提条件」は手順書の見出しで、
+  // リファレンスの冒頭に並ぶと、読者役が手順書の見出しと受け取った（実地検証 IndustrialEmulator）
+  reference: ["一覧"],
   spec: ["目的", "用語", "仕様", "制約", "未確認"],
   // チュートリアルは種類として認めるが、見出しは決めない（読者によって形が違う。シニア向けの基本操作と、技術者向けのサンプルの通し）。
   // 推奨の見出しは templates/tutorial.md にある
@@ -389,7 +391,9 @@ export function tokenizeLines(text) {
 
 export function detectDocType(text) {
   const head = String(text).split(/\r?\n/).slice(0, 15).join("\n");
-  const m = head.match(/<!--\s*doc-type:\s*([a-zA-Z0-9_-]+)\s*-->/);
+  // 値は ASCII に限らず読む。`手順書` のような値を読み落とすと、マーカーが無い文書として必須見出しの検査が黙って外れる（0.14.0 の査読 R16）
+  // `<` `>` は値に含めない（説明文の `<!-- doc-type: <種別> -->` のようなプレースホルダーを値として拾わない）
+  const m = head.match(/<!--\s*doc-type:\s*([^\s<>]+?)\s*-->/);
   return m ? m[1] : null;
 }
 
