@@ -42,7 +42,18 @@ export const DEFAULT_REQUIRED_HEADINGS = {
   howto: ["できること", "前提条件", "手順", "確認", "うまくいかない場合"],
   reference: ["できること", "前提条件", "一覧"],
   spec: ["目的", "用語", "仕様", "制約", "未確認"],
+  // チュートリアルは種類として認めるが、見出しは決めない（読者によって形が違う。シニア向けの基本操作と、技術者向けのサンプルの通し）。
+  // 推奨の見出しは templates/tutorial.md にある
+  tutorial: [],
 };
+
+/**
+ * 必須見出しを持たない文書の種類。マーカーは書くが、見出しは検査しない
+ * （landing: サイトの入口・案内 / history: 読者向けの改訂履歴のページ / explanation: 解説）。
+ * これと requiredHeadings のどちらにも無い種類は、書き間違いとして指摘する
+ * （実地検証 IndustrialEmulator の G4: 知らない種類を黙って素通りさせ、必須見出しの検査が外れていた）
+ */
+export const FREE_DOC_TYPES = ["landing", "history", "explanation"];
 
 export const DEFAULT_CONFIG = {
   schemaVersion: SCHEMA_VERSION,
@@ -112,6 +123,33 @@ export function matchesAny(relPath, globs) {
 
 function projectDir() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
+}
+
+/**
+ * 文書の属するプロジェクトのルート。
+ * 1. 文書がセッションのプロジェクト（CLAUDE_PROJECT_DIR か作業フォルダー）の中にあり、そこに config があれば、そのプロジェクト
+ *    （今までどおり。プロジェクトの中に config の雛形を置いたフォルダー（ハーネス自身の scaffold/）があっても、そちらに切り替えない。
+ *    ただしセッションをほかのリポジトリで開いて scaffold/ の下を書くと、2 で雛形の config が見つかり、雛形の規則で検査される）
+ * 2. そうでなければ、文書のフォルダーから上へ、config（.claude/doc-harness.config.json）のある最初のフォルダー
+ * 3. 見つからなければ、セッションのプロジェクト
+ * セッションを別のリポジトリで開いたまま、ほかのプロジェクトの文書を書いたときにも、そのプロジェクトの規則で検査する
+ * （実地検証 IndustrialEmulator の G1: 作業フォルダーのプロジェクトしか見ず、フックが1回も走らなかった）
+ */
+export function findProjectDir(file, fallback = projectDir()) {
+  const abs = path.resolve(file);
+  const base = path.resolve(fallback);
+  const inside = (() => {
+    const r = path.relative(base, abs);
+    return !!r && r !== ".." && !r.startsWith(".." + path.sep) && !path.isAbsolute(r);
+  })();
+  if (inside && fs.existsSync(path.join(base, CONFIG_RELATIVE_PATH))) return base;
+  let d = path.dirname(abs);
+  for (;;) {
+    if (fs.existsSync(path.join(d, CONFIG_RELATIVE_PATH))) return d;
+    const up = path.dirname(d);
+    if (up === d) return base;
+    d = up;
+  }
 }
 
 /** stdin の JSON を読む。読めない・壊れている場合は null */
@@ -433,7 +471,18 @@ export function checkWords(lines, style) {
 
 function requiredHeadingIssues(docType, headings, config) {
   if (!docType) return [];
-  const required = (config.requiredHeadings || {})[docType];
+  const table = config.requiredHeadings || DEFAULT_REQUIRED_HEADINGS;
+  if (!Object.hasOwn(table, docType) && !FREE_DOC_TYPES.includes(docType)) {
+    const known = [...Object.keys(table), ...FREE_DOC_TYPES];
+    return [
+      {
+        line: null,
+        kind: "heading",
+        message: `知らない文書の種類「${docType}」: ${known.join("・")} のどれかを書いてください（新しい種類は config の requiredHeadings に足す）`,
+      },
+    ];
+  }
+  const required = table[docType];
   if (!Array.isArray(required) || !required.length) return [];
   const missing = required.filter((kw) => !headings.some((h) => h.includes(kw)));
   if (!missing.length) return [];
@@ -870,7 +919,14 @@ export function plannedDocs(dir) {
   if (!gdir || !head) return null;
   try {
     const b = JSON.parse(fs.readFileSync(path.join(path.resolve(dir, gdir), "harness-doc", "baseline.json"), "utf-8"));
-    if (b.passed || b.head !== head || !b.files) return null;
+    if (b.passed || !b.files) return null;
+    if (b.head !== head) {
+      // 基準点の後のコミットが、基準点のファイルに触れていなければ（別の作業のコミット）、基準点は有効のまま（0.14.0 の G7 と同じ判定）
+      const count = b.head ? run(["rev-list", "--count", `${b.head}..HEAD`]) : null;
+      if (!count || Number(count) === 0) return null;
+      const touching = run(["--literal-pathspecs", "log", "--format=%h", `${b.head}..HEAD`, "--", ...Object.keys(b.files)]);
+      if (touching === null || touching !== "") return null;
+    }
     return new Set(Object.keys(b.files).map((k) => path.posix.normalize(toPosix(k))));
   } catch {
     return null;
@@ -901,11 +957,11 @@ function mainHook() {
   const filePath = payload?.tool_input?.file_path;
   if (!filePath) process.exit(0);
 
-  const dir = projectDir();
+  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(payload.cwd || projectDir(), filePath);
+  const dir = findProjectDir(abs);
   const { status, config } = loadConfig(dir);
   if (status !== "ok") process.exit(0);
 
-  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(payload.cwd || dir, filePath);
   const style = loadStyle(dir, config);
   const result = checkFile(abs, dir, config, style);
   if (!result || result.issues.length === 0) process.exit(0);
@@ -928,13 +984,20 @@ function mainHook() {
 }
 
 function mainCli(files, { changed = false } = {}) {
-  const dir = projectDir();
-  const { status, config } = loadConfig(dir);
-  const effective = status === "ok" ? config : { ...DEFAULT_CONFIG, include: ["**/*.md", "**/*.html", "**/*.htm"], exclude: [] };
-  const style = loadStyle(dir, effective);
+  const projects = new Map(); // プロジェクトのルートごとに config と style を1回だけ読む
+  const projectOf = (abs) => {
+    const dir = findProjectDir(abs);
+    if (!projects.has(dir)) {
+      const { status, config } = loadConfig(dir);
+      const effective = status === "ok" ? config : { ...DEFAULT_CONFIG, include: ["**/*.md", "**/*.html", "**/*.htm"], exclude: [] };
+      projects.set(dir, { dir, effective, style: loadStyle(dir, effective) });
+    }
+    return projects.get(dir);
+  };
   let failed = false;
   for (const f of files) {
     const abs = path.resolve(f);
+    const { dir, effective, style } = projectOf(abs);
     const result = checkFile(abs, dir, effective, style);
     if (!result) {
       process.stdout.write(`[check-docs] 対象外: ${toPosix(path.relative(dir, abs))}\n`);

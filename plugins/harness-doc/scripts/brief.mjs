@@ -36,7 +36,8 @@ const KV_HEADER = ["項目", "値", "状態", "由来"];
 export const GROUP_SECTIONS = {
   読者: ["プロファイル", "読者像", "読む状況"],
   事実の承認者: ["承認者"],
-  読者向けの改訂履歴: ["読者向けの改訂履歴"],
+  // 置き場所: 「各文書」（既定。各文書の「改訂履歴」の節）か、まとめのページのパス（プロジェクトのルートから。例 web/manual/history.html）
+  読者向けの改訂履歴: ["読者向けの改訂履歴", "置き場所"],
 };
 /** 文書ごとの決め事の項目 */
 export const DOC_ITEMS = ["ゴール", "文書の種類", "受け入れ基準", "扱わないこと", "読者向けの改訂履歴"];
@@ -257,8 +258,24 @@ function entry(v, by, date) {
  * }
  * 値は文字列か { value, status }。
  */
-export function writeBrief(dest, input, date = today()) {
+/** writeBrief が受け取る最上位のキー。これ以外は黙って捨てずに止める（実地検証 IndustrialEmulator の G2） */
+export const BRIEF_INPUT_KEYS = ["name", "title", "paths", "by", "note", "set", "outOfScope", "removeOutOfScope", "styleDiff"];
+
+/** writeBrief の入力の形を確かめる（書き込まない。apply.mjs の --dry-run でも使う）。誤りなら Error を投げる */
+export function validateBriefInput(input) {
   if (!input || !/^[a-z0-9][a-z0-9-]*$/i.test(input.name || "")) throw new Error("name は英数字とハイフンで指定する（ファイル名 doc-brief-<name>.md になる）");
+  const unknownKeys = Object.keys(input).filter((k) => !BRIEF_INPUT_KEYS.includes(k));
+  if (!unknownKeys.length) return;
+  const hints = [];
+  if (Object.keys(GROUP_SECTIONS).concat("文書ごとの決め事").some((s) => unknownKeys.includes(s)) || unknownKeys.includes("docs"))
+    hints.push("節の値（読者・文書ごとの決め事ほか）は set の中に書く（例: {\"set\":{\"文書ごとの決め事\":{\"index.html\":{\"ゴール\":\"…\"}}}}）");
+  if (unknownKeys.includes("扱わないこと")) hints.push("扱わないことは outOfScope（文字列の配列）で渡す");
+  if (unknownKeys.includes("文体の差分")) hints.push("文体の差分は styleDiff で渡す");
+  throw new Error(`知らないキー: ${unknownKeys.join(", ")}（使えるのは ${BRIEF_INPUT_KEYS.join("・")}）${hints.length ? "。" + hints.join("。") : ""}`);
+}
+
+export function writeBrief(dest, input, date = today()) {
+  validateBriefInput(input);
   const by = (input.by === "書き手" ? "書き手" : "依頼者") + (input.note ? `（${input.note}）` : "");
   const file = path.join(dest, RULES_DIR, `${BRIEF_PREFIX}${input.name}.md`);
   let brief;

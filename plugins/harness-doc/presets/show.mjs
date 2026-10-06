@@ -4,7 +4,7 @@
  *
  *   node show.mjs voices              文体の見本集
  *   node show.mjs visuals             見た目の方向性
- *   node show.mjs profile <名前>      読者プロファイル（beginner / operator / developer）
+ *   node show.mjs profile <名前>      読者プロファイル（beginner / engineer / operator / developer）
  *   node show.mjs reference <名前>    知見のまとめ（structure / writing / japanese / web / accessibility）
  *   node show.mjs claude-section     プロジェクトの CLAUDE.md に置く「文書ルール（harness-doc）」の節の最新版
  *   node show.mjs path <名前>         plan-doc の経路の手順（S / M / L / tone / finish）

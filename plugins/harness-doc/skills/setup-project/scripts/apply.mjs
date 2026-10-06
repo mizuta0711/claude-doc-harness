@@ -30,7 +30,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeBrief, RULES_DIR, BRIEF_PREFIX } from "../../../scripts/brief.mjs";
+import { writeBrief, validateBriefInput, RULES_DIR, BRIEF_PREFIX } from "../../../scripts/brief.mjs";
 
 const NL = "\n";
 const SECTION_HEADING = "## 文書ルール（harness-doc）";
@@ -173,6 +173,12 @@ function main() {
       process.exit(1);
     }
     if (args.dryRun) {
+      try {
+        validateBriefInput(input); // 本番で止まる入力を、dry-run でも止める
+      } catch (e) {
+        process.stderr.write(`ブリーフに書けない: ${e.message}` + NL);
+        process.exit(1);
+      }
       say(`--dry-run: ${RULES_DIR}/${BRIEF_PREFIX}${input.name}.md に書き込む内容を確かめるだけ（書き込まない）`);
       say(JSON.stringify(input, null, 2));
       return;

@@ -37,7 +37,7 @@ model: inherit
 
 ## 手順
 
-1. 呼び出し側から渡された**読者プロファイル**（beginner / operator / developer）を読む。
+1. 呼び出し側から渡された**読者プロファイル**（beginner / engineer / operator / developer）を読む。
    内容がプロンプトに貼ってあればそれを使う。名前だけなら `${CLAUDE_PLUGIN_ROOT}/skills/manual-writer/profiles/<名前>.md` を読む。渡されていなければ
    ブリーフの「読者」、それも無ければ文書の冒頭の読者記述から最も近いものを選び、選んだことを報告の先頭に書く
 2. **ブリーフ**（文書群の決め事。読者・扱わないこと・文書の種類・受け入れ基準）がプロンプトに貼ってあれば読む。

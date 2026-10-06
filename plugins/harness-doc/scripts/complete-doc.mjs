@@ -25,7 +25,8 @@
  *
  * 見ること（文書ごと）:
  *   1. 内部の改訂記録（docs-style/history/<文書群>.md）に、その文書の節が足されている。改訂意図が空でない
- *   2. ブリーフで読者向けの改訂履歴が「あり」なら、文書の「改訂履歴」の節が変わっている（新しい文書なら、節があり行がある）
+ *   2. ブリーフで読者向けの改訂履歴が「あり」なら、文書の「改訂履歴」の節が変わっている（新しい文書なら、節があり行がある）。
+ *      ブリーフの「置き場所」がまとめのページのパスなら、文書の代わりにそのページの節を見る（ページも基準点に入れる）
  *   3. 本文に問い合わせの印（<!-- 問い合わせ: -->）が残っていない（--allow-queries で警告にとどめる）
  *   4. check-docs の指摘が、作業前より増えていない（Bash で書き換えてフックを通らなかった文書も、ここで捕まえる。
  *      作業前からある指摘は数えない）
@@ -79,6 +80,39 @@ function readOrNull(dest, rel) {
   return fs.existsSync(abs) ? fs.readFileSync(abs, "utf-8") : null;
 }
 
+/**
+ * 基準点の後のコミットのうち、基準点のファイル（文書・内部の改訂記録）に触れたもの。
+ * 戻り値: { count: 基準点の後のコミットの数, touching: ["<短いハッシュ> <件名>", ...] }。git で読めなければ null
+ */
+export function commitsAfterBaseline(dest, baseline) {
+  if (!baseline?.head) return null;
+  try {
+    const count = git(dest, ["rev-list", "--count", `${baseline.head}..HEAD`]).trim();
+    const files = Object.keys(baseline.files || {});
+    const touching = files.length
+      ? git(dest, ["--literal-pathspecs", "log", "--format=%h %s", `${baseline.head}..HEAD`, "--", ...files]).split(/\r?\n/).filter(Boolean)
+      : [];
+    return { count: Number(count) || 0, touching };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 基準点の後にコミットがあるときの知らせ。基準点のファイルに触れていなければ、別の作業（別のセッション）のコミットとして
+ * 警告にしない（実地検証 IndustrialEmulator の G7: 同じプロジェクトで別のセッションがコミットし、的外れな警告が出た）
+ */
+function baselineCommitsNote(dest, baseline, advice) {
+  const c = commitsAfterBaseline(dest, baseline);
+  const head = `[complete-doc] 基準点（${baseline.createdAt} に記録）の後に`;
+  if (c && c.count === 0)
+    return `[complete-doc] 警告: HEAD が基準点（${baseline.createdAt} に記録）から移っている（ブランチの切り替えか、前のコミットへの reset）。${advice}`;
+  if (c && c.count && !c.touching.length)
+    return `${head}コミットが ${c.count} 件あるが、どれも基準点の文書・改訂記録に触れていない（別の作業のコミット）。この作業の判定には影響しない`;
+  const list = c && c.touching.length ? `: ${c.touching.slice(0, 3).join(" / ")}${c.touching.length > 3 ? " ほか" : ""}` : "";
+  return `[complete-doc] 警告: 基準点（${baseline.createdAt} に記録）の後に、基準点の文書・改訂記録に触れたコミットがある${list}。${advice}`;
+}
+
 function headOf(dest) {
   try {
     return git(dest, ["rev-parse", "HEAD"]).trim();
@@ -120,6 +154,16 @@ export function markBaseline(dest, docs = [], { add = false, reset = false, conf
     if (!hasOwn(base.files, rel)) base.files[rel] = readOrNull(dest, rel);
   };
   for (const k of historyNow) put(k);
+  // 読者向けの改訂履歴のまとめのページも作業前を残す（残さないと HEAD と比べることになり、前の作業がコミットせずに足した行で
+  // 今の作業が合格してしまう。0.14.0 の査読）
+  try {
+    for (const b of loadBriefs(dest)) {
+      const page = historyPageOf(dest, b);
+      if (page) put(page);
+    }
+  } catch {
+    /* ブリーフが読めなくても、渡された文書の基準点は残る */
+  }
   for (const d of docs) put(relOf(dest, d));
   try {
     for (const rel of changedDocs(dest, config || loadConfig(dest).config || DEFAULT_CONFIG, false)) put(rel);
@@ -260,6 +304,16 @@ const stripHtmlCode = (s) =>
  * 見出しの名前は config の revisionHeadings（既定「改訂履歴」。既存のサイトが「更新履歴」なら setup-project が合わせる）。
  * 節は、同じレベルかそれより上の見出しまで（下位の見出しで区切った改訂履歴も1つの節として読む）。コードの中の見出しは見ない
  */
+/**
+ * ブリーフの「読者向けの改訂履歴 / 置き場所」がまとめのページのパスなら、そのパス（プロジェクトのルートからの相対）。
+ * 空・「各文書」なら null（各文書の「改訂履歴」の節を見る）
+ */
+export function historyPageOf(dest, brief) {
+  const v = String(brief?.group?.["読者向けの改訂履歴"]?.["置き場所"]?.value || "").replace(/`/g, "").trim();
+  if (!v || /^各文書/.test(v)) return null;
+  return relOf(dest, v);
+}
+
 export function revisionSection(text, html, names = ["改訂履歴"]) {
   const src = String(text).replace(/\r\n/g, "\n");
   const hit = (title) => names.some((n) => title.includes(n));
@@ -582,11 +636,29 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
   const now = after(dest, rel, staged);
   const names = config.revisionHeadings || ["改訂履歴"];
   if (wantsReader) {
-    const cur = revisionSection(now, html, names);
-    const old = revisionSection(before(dest, rel), html, names);
-    if (cur === null) problems.push(`読者向けの改訂履歴が「あり」なのに、文書に「${names.join("」か「")}」の節が無い`);
-    else if (old === null && !dataRows(cur, html)) problems.push("読者向けの改訂履歴の節に、行が無い（新しい文書なら「初版」の行を書く）");
-    else if (old !== null && cur.trim() === old.trim()) problems.push("読者向けの改訂履歴が「あり」なのに、改訂履歴の節に行が足されていない");
+    // 置き場所がまとめのページなら、文書ごとではなくそのページの改訂履歴を見る（実地検証 IndustrialEmulator の G3）
+    const page = historyPageOf(dest, r.brief);
+    const target = page || rel;
+    const onPage = !!page && page !== rel;
+    const at = onPage ? `まとめのページ（${page}）の` : ""; // 文書ごとのときは、前からの文言のまま
+    const tHtml = isHtmlPath(target);
+    const tNow = target === rel ? now : exists(dest, target, staged) ? after(dest, target, staged) : null;
+    const cur = tNow === null ? null : revisionSection(tNow, tHtml, names);
+    const old = revisionSection(before(dest, target), tHtml, names);
+    if (tNow === null)
+      problems.push(
+        staged && fs.existsSync(path.join(dest, page))
+          ? `読者向けの改訂履歴のまとめのページ（${page}）がこのコミットに入っていない（文書と一緒にコミットする）`
+          : `読者向けの改訂履歴のまとめのページ（${page}）が無い（ブリーフの「置き場所」を確かめる）`
+      );
+    else if (cur === null) problems.push(`読者向けの改訂履歴が「あり」なのに、${onPage ? `まとめのページ（${page}）` : "文書"}に「${names.join("」か「")}」の節が無い`);
+    else if (old === null && !dataRows(cur, tHtml)) problems.push(`${at}読者向けの改訂履歴の節に、行が無い（新しい文書なら「初版」の行を書く）`);
+    else if (old !== null && cur.trim() === old.trim())
+      problems.push(
+        onPage
+          ? `読者向けの改訂履歴が「あり」なのに、まとめのページ（${page}）に行が足されていない${staged ? "か、このコミットに入っていない（文書と一緒にコミットする）" : ""}`
+          : "読者向けの改訂履歴が「あり」なのに、改訂履歴の節に行が足されていない"
+      );
   }
   // 3. 問い合わせの印（コードの中は見ない）
   const body = html ? stripHtmlCode(now) : stripMdCode(now);
@@ -819,8 +891,10 @@ function main() {
       process.stderr.write(`${sub} には文書のパスを渡す` + NL);
       process.exit(2);
     }
-    if (b.passed || (b.head && b.head !== headOf(dest)))
-      say(`[complete-doc] 警告: 基準点（${b.createdAt} に記録）は${b.passed ? "前の作業で通過済み" : "その後にコミットがある"}。この作業の作業前かを確かめる（違えば作業の始めに --mark を走らせる）`);
+    if (b.passed)
+      say(`[complete-doc] 警告: 基準点（${b.createdAt} に記録）は前の作業で通過済み。この作業の作業前かを確かめる（違えば作業の始めに --mark を走らせる）`);
+    else if (b.head && b.head !== headOf(dest))
+      say(baselineCommitsNote(dest, b, "この作業の作業前かを確かめる（違えば作業の始めに --mark を走らせる）"));
     let bad = false;
     for (const rel of [...new Set(files.map((f) => relOf(dest, f)))]) {
       if (!hasOwn(b.files, rel)) {
@@ -896,7 +970,7 @@ function main() {
   if (!baseline && !staged)
     say("[complete-doc] 作業前の基準点が無いので、最後のコミットと比べる（作業の始めに --mark を走らせる）");
   if (baseline && baseline.head && baseline.head !== headOf(dest))
-    say(`[complete-doc] 警告: 基準点（${baseline.createdAt} に記録）の後にコミットがある。前の作業の基準点が残っていないか確かめる`);
+    say(baselineCommitsNote(dest, baseline, "前の作業の基準点が残っていないか確かめる"));
   const changedSinceMark = (rel) => readOrNull(dest, rel) !== baseline.files[rel];
   const markedDocs = baseline ? Object.keys(baseline.files).filter((k) => !k.startsWith(historyRel)) : [];
   if (!targets.length) {

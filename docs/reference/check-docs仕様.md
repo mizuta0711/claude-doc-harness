@@ -35,7 +35,7 @@ PostToolUse（matcher: `Write|Edit|MultiEdit`）の stdin JSON。使うのは次
 | `tool_input.file_path` | 検査対象。相対パスなら `cwd` から解決する |
 | `cwd` | 相対パスの基準 |
 
-環境変数 `CLAUDE_PROJECT_DIR` をプロジェクトルートとする（未設定なら `process.cwd()`）。
+プロジェクトルートは、環境変数 `CLAUDE_PROJECT_DIR`（未設定なら `process.cwd()`）とする。ただし文書がその外にあるとき・そこに設定ファイルが無いときは、文書のフォルダーから上へたどって、最初に `.claude/doc-harness.config.json` が見つかったフォルダーとする（見つからなければ `CLAUDE_PROJECT_DIR`）。セッションを別のリポジトリで開いたまま、ほかのプロジェクトの文書を書いても、そのプロジェクトの規則で検査する（0.14.0）。CLI も文書ごとに同じ方法で決める。
 
 CLI としても使える。ファイルを引数に渡すと、設定が無くても `**/*.md`・`**/*.html`・`**/*.htm` を対象に検査する。
 
@@ -89,7 +89,7 @@ glob は `**`（階層をまたぐ）・`*`（またがない）・`?` だけを
 
 | # | 検査 | 根拠 | 判定 |
 |---|---|---|---|
-| 1 | 必須見出し | `requiredHeadings[種別]` | 文書種別マーカーがある文書だけ。見出しテキストに語を**含めば**よい（「## 2. 手順」は「手順」に一致） |
+| 1 | 必須見出し | `requiredHeadings[種別]` | 文書種別マーカーがある文書だけ。見出しテキストに語を**含めば**よい（「## 2. 手順」は「手順」に一致）。`tutorial`・`landing`・`history`・`explanation` は見出しを検査しない。`requiredHeadings` にもこの4つにも無い種別は「知らない文書の種類」として止める（書き間違いを素通りさせない。0.14.0） |
 | 2 | 曖昧語 | `docs-style/banned-words.txt` | 本文の行に含まれる。Markdown はコードブロック内・インラインコード内・`<!--` で始まる行を除く。HTML は下の「HTML の本文」を見る |
 | 3 | コードブロックの言語指定 | — | 開きフェンス（```` ``` ```` または `~~~`）の直後が空 |
 | 4 | 用語集の表記ゆれ | `docs-style/glossary.md` と `glossaryFiles` の表の「禁止」列（下の「用語表の読み方」） | 散文に含まれる。禁止表記が推奨表記の先頭部分で、その位置が推奨表記として読めるなら検出しない（`サーバ` / `サーバー`） |
@@ -151,7 +151,7 @@ HTML では、バッククォートはただの文字でインラインコード
 | `styleDir` | string | `"docs-style"` | 用語集と曖昧語リストの置き場（プロジェクトルートからの相対） |
 | `include` | string[] | `["docs/**/*.md", "docs/**/*.html", "README.md"]` | 検査対象 |
 | `exclude` | string[] | `["docs/handoff/**", "CHANGELOG.md"]` | 検査対象から外すもの |
-| `requiredHeadings` | object | howto / reference / spec の3種 | 文書種別ごとの必須見出し。種別を足せる |
+| `requiredHeadings` | object | howto / reference / spec の3種と tutorial（空） | 文書種別ごとの必須見出し。種別を足せる（足した種別は「知らない文書の種類」にならない） |
 | `linters.markdownlint` | boolean | true | `false` で実行しない |
 | `linters.textlint` | boolean | true | `false` で実行しない |
 | `glossaryFiles` | string[] | `[]` | プロジェクトが既に持つ用語表（プロジェクトルートからの相対パス）。`docs-style/glossary.md` に加えて読む |

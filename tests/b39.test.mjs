@@ -197,7 +197,11 @@ test("フック: 作業中の基準点に登録された文書へのリンク切
   g(dir, "add", "x.txt");
   g(dir, "commit", "-q", "-m", "after");
   fs.writeFileSync(path.join(dir, DOC), OLD + "\n[c](c.md)\n");
-  assert.equal(hook().status, 2, "その後にコミットがある基準点は使わない");
+  assert.equal(hook().status, 0, "基準点の文書に触れないコミット（別の作業）の後も、基準点は使う（0.14.0 の G7）");
+  fs.writeFileSync(path.join(dir, "docs", "b.md"), "# B\n\n足した。\n");
+  g(dir, "add", "docs/b.md");
+  g(dir, "commit", "-q", "-m", "touch b");
+  assert.equal(hook().status, 2, "基準点の文書に触れたコミットの後の基準点は使わない");
 });
 
 test("commit-check: 文だけの変数の代入を置き換える（B1 の評価 #12）", () => {

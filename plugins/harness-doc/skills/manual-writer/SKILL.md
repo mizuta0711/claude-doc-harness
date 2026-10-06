@@ -31,12 +31,14 @@ plan-doc から渡されたときは、**承認済みの改訂設計書**（`doc
 | 手順書（操作・運用・復旧） | [templates/howto.md](templates/howto.md) | beginner または operator | **手順を実際に実行して**結果を確かめる |
 | リファレンス（設定・コマンド・API） | [templates/reference.md](templates/reference.md) | developer または operator | **コード・設定と照合**する |
 | 仕様書（振る舞い・制約） | [templates/spec.md](templates/spec.md) | developer | **コード・テストと照合**する |
+| チュートリアル（サンプルで体験する） | [templates/tutorial.md](templates/tutorial.md) | beginner または engineer | **手順を最初から最後まで実際に通す**（どの読者がやっても完走できるか） |
 
-読者プロファイルは3つ。迷ったら「読み終えたら何ができるべきか」で選ぶ。
+読者プロファイルは4つ。迷ったら「読み終えたら何ができるべきか」で選ぶ。
 
 | プロファイル | 読者像 | ファイル |
 |---|---|---|
-| beginner | 初めて使う人。画面を見ながら読む | [profiles/beginner.md](profiles/beginner.md) |
+| beginner | 初めて使う人。機械が苦手なこともある。画面を見ながら読む | [profiles/beginner.md](profiles/beginner.md) |
+| engineer | 専門の技術（通信・開発・試験）は持っているが、この製品は初めて使う技術者 | [profiles/engineer.md](profiles/engineer.md) |
 | operator | 障害時に焦って読む運用担当 | [profiles/operator.md](profiles/operator.md) |
 | developer | 保守・拡張する開発者 | [profiles/developer.md](profiles/developer.md) |
 
@@ -221,6 +223,7 @@ node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" reference web
   既存のサイトの見出しの語がこれと違う（「準備」と「前提条件」）なら、マーカーを外さない。どちらに寄せるかは、**改訂設計書の承認の問い（plan-doc の M の経路。L は Stage 1 の承認の問い）で聞いてある**。聞いていなければ、ここで新しく問わず、見出しに必須の語を含める形（「準備（前提条件）」）で書き、完了前の確認で示す。
   選択肢は「目次の見出しに必須の語を含める（「準備（前提条件）」）」と「config の `requiredHeadings` をサイトの語に合わせる（プロジェクトのすべての手順書に効く）」。
   後者は `apply.mjs --config '{"requiredHeadings":{"howto":["できること","準備","手順","確認","うまくいかない場合"]}}'` で書く
+- マーカーに書ける値は `howto`・`reference`・`spec` と、見出しを検査しない `tutorial`（チュートリアル）・`landing`（サイトの入口）・`history`（読者向けの改訂履歴のページ）・`explanation`（解説）。これ以外は書き間違いとして止まる（`references/structure.md` の末尾）
 - 既存の文書の冒頭の `<!-- doc-type: ... -->` マーカーは消さない
 - **この文書の種類を1つに決める**（チュートリアル・手順書・リファレンス・解説）。2つの種類にまたがるなら分割し、もう一方へはリンクで渡す
 - **「読者がやりたいこと」の順に並べる。** 実装の都合・機能の一覧順にしない
