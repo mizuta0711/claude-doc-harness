@@ -46,7 +46,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 
 | 結果 | 次 |
 |---|---|
-| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** 次のどれかに当たれば、**「導入済みのプロジェクトに足す」**（下の節）を行う。(1) ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無い（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list`）。(2) `CLAUDE.md` の「文書ルール（harness-doc）」の節が最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）と違う。(3) ブリーフの文書群に、内部の改訂記録（`docs-style/history/<名前>.md`）が無い。どれにも当たらなければ、文体を変えたいなら `plan-doc`（テイスト変更）、読者や範囲を変えたいなら `plan-doc`（方針変更として `change-policy` に渡る）を案内して終える |
+| `hasHarnessDoc: true` | 導入済み。**導入をやり直さない。** 次のどれかに当たれば、**「導入済みのプロジェクトに足す」**（下の節）を行う。(1) ブリーフ（`.claude/rules/doc-brief-*.md`）が1つも無い（`node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" list`）。(2) `CLAUDE.md` の「文書ルール（harness-doc）」の節が最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）と違う。(3) ブリーフの文書群に、内部の改訂記録（`docs-style/history/<名前>.md`）が無い。(4) 依頼者が入口（目次・索引・サイドバー）を決めたいと頼んだ（文書群の見直しの結果から来た場合を含む）。ブリーフに「入口」が無いことだけでは当たらない（自動では勧めない）。どれにも当たらなければ、文体を変えたいなら `plan-doc`（テイスト変更）、読者や範囲を変えたいなら `plan-doc`（方針変更として `change-policy` に渡る）を案内して終える |
 | `existing: true`（利用者向けの文書の候補がある） | Step 2A（既存） |
 | `existing: false` | Step 2B（新規） |
 
@@ -154,6 +154,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
    | 読者 | 読者プロファイル（beginner / engineer / operator / developer）と、そのプロジェクト固有の読者像（「初めて使うシニア。設定は家族が手伝う」）。既存なら文書の書きぶりから推測して示す。**技術者向けの製品を初めて使う人は engineer**（beginner は機械が苦手な人も含む読者、operator は障害時の運用担当で、どちらも観点がずれる） |
    | 扱わないこと | この文書群の責任の外にあること（「端末 OS の設定」）。無ければ「なし」 |
    | 事実の承認者 | 製品の振る舞いの正誤を判断する人（既定は依頼者） |
+   | 入口 | 文書群の文書へ読者を導くファイル（目次・索引・サイドバー）。**案は決めてもらう前に、実物から作る**。候補の順は、(1) 文書群の場所の `index.*`・`README.md`、(2) 文書群の中の多くの文書へリンクしているファイル（`node "${CLAUDE_SKILL_DIR}/../../scripts/docset.mjs" --json` の `docs[].out`）。サイドバーを JavaScript が持つサイトなら、文書のファイル名が並んでいる JavaScript を `Grep` で探して候補にする（入口は Markdown・HTML とは限らない）。**同じ数で並ぶとき**（どのページもサイドバーを写しているサイト）は、推奨を付けず、候補を並べて選んでもらう。見つからなければ空のままにする（入口が決まっていなくても、どの工程も止まらない）。複数あるときはカンマ区切りで、プロジェクトのルートからのパスで書く。`"set":{"入口":{"入口のファイル":"web/usage/index.html"}}` |
    | 読者向けの改訂履歴 | 読者に「いつ・どこを・どう変えたか」を見せるか。**案は「あり」で作る**（`default` の README も同じ）。アプリ内のヘルプのように見せる意味が無いと思うときも、「なし」は案の理由を添えて示し、依頼者に選んでもらう。**「あり」なら置き場所も決める**: 各文書の末尾の「改訂履歴」の節（既定）か、サイトの改訂履歴のページにまとめるか。まとめるなら `"set":{"読者向けの改訂履歴":{"読者向けの改訂履歴":"あり","置き場所":"web/manual/history.html"}}` のようにページのパスを**プロジェクトのルートから**書く（文書ごとの決め事の見出しと違い、`paths` の基点からではない）（完了処理の検査が、各文書ではなくそのページを見る） |
 
 3. **依頼者が確かめた値は「確定」、推測のまま置いた値は「仮定」**で書く（Step 3）。仮定の値は、文書を書くときに `manual-writer` が確かめ直す
@@ -166,6 +167,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 2. `CLAUDE.md` の「文書ルール（harness-doc）」の節と、最新版の節（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" claude-section`）を比べる。
    違えば、違う規則を1行ずつ挙げる（例:「規則1: 入口が manual-writer から plan-doc に変わった」「規則9: 改訂の記録が無い」）
    `docs-style/README.md`（利用者向けの使い方）も、最新版（`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" style-readme`）と比べる。違えば、違う行を挙げる（例:「行単位の抑止を使ってよい場合が増えた」）
+   ブリーフに「入口」の節の値が無い文書群があれば（0.19.0 で足された節は、決まっていない状態で書かれる）、Step 2C の表の「入口」の案を作る。**ブリーフが「入口」を持たなくても、このモードを勧める理由にはしない**（ほかの理由で足すときに、一緒に案を作る）。
    `docs-style/voice.md` に「図と画面」「例に使う名前」の節（0.17.0）が無ければ、Step 2A-4 の表の読み取りで案を作る。読む実物は config の `include` の場所の文書と、そこが読み込む CSS。文書がまだ無ければ Step 2B-2 の案を使う。
    「見た目」の表に古い「図の描き方」の行があれば、その値を新しい「図と画面」の節へ移し、「見た目」のその行は「使える図の部品」に置き換える（同じ項目を2か所に置かない）。ほかの節は変えない
 3. Step 2C の 2・3 と、上の節と `docs-style/README.md` の置き換え（「最新版で置き換える（推奨）／置き換えない」）と、`voice.md` に足す節の案を、**まとめて1回で**確かめる。
@@ -200,7 +202,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 3. ブリーフを書く（Step 2C で決めた文書群ごとに1回）。`.claude/` 配下なので `Edit` で書かず、このスクリプトで書く
 
    ```bash
-   node "${CLAUDE_SKILL_DIR}/scripts/apply.mjs" --dest "<導入先>" --brief '{"name":"usage","title":"利用者向けの使い方","paths":["docs/web/usage/**"],"by":"依頼者","set":{"読者":{"プロファイル":"beginner","読者像":"初めて使うシニア。設定は家族が手伝う"},"事実の承認者":{"承認者":"依頼者"},"読者向けの改訂履歴":{"読者向けの改訂履歴":"あり"}},"outOfScope":["端末 OS の設定"]}'
+   node "${CLAUDE_SKILL_DIR}/scripts/apply.mjs" --dest "<導入先>" --brief '{"name":"usage","title":"利用者向けの使い方","paths":["docs/web/usage/**"],"by":"依頼者","set":{"読者":{"プロファイル":"beginner","読者像":"初めて使うシニア。設定は家族が手伝う"},"事実の承認者":{"承認者":"依頼者"},"読者向けの改訂履歴":{"読者向けの改訂履歴":"あり"},"入口":{"入口のファイル":"docs/web/usage/index.html"}},"outOfScope":["端末 OS の設定"]}'
    ```
 
    推測のまま置く値は `{"value":"...","status":"仮定"}` の形で渡す。文書群の文体が `voice.md` と違うなら `"styleDiff":"..."` も渡す。
@@ -257,7 +259,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/inventory.mjs" --dest "<導入先>"
 | 導入先 | パス。新規か既存か。dev-harness 併用か |
 | 検査対象 | `include` と `exclude` |
 | 文体 | `voice.md` の要約（文末・温度・専門用語）。踏襲か選択か |
-| 文書群とブリーフ | 文書群ごとに、名前・`paths`・読者・扱わないこと・読者向けの改訂履歴。「仮定」のまま置いた値 |
+| 文書群とブリーフ | 文書群ごとに、名前・`paths`・読者・扱わないこと・読者向けの改訂履歴・入口。「仮定」のまま置いた値 |
 | 用語表 | `docs-style/glossary.md` と `glossaryFiles` |
 | 見た目 | 従う CSS、または選んだ方向性 |
 | 置いたもの / 触らなかったもの | `apply.mjs` の結果 |

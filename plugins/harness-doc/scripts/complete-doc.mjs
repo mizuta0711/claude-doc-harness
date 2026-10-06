@@ -31,6 +31,10 @@
  *   4. check-docs の指摘が、作業前より増えていない（Bash で書き換えてフックを通らなかった文書も、ここで捕まえる。
  *      作業前からある指摘は数えない）
  *   5. 改行コード（CRLF / LF）が作業前と変わっていない（変わっていれば警告。基準点と比べるときだけ）
+ *   6. 外から入ってくるリンクが切れていない（文書ごとの検査の後に、直した文書を行き先とするリンクを、include 全体と入口のファイルから集めて見る。
+ *      消した・`git mv` した文書を含む。リンク元の今の中身を、行き先の作業前の中身と今の中身の両方と比べ、増えた切れだけを止める。
+ *      前からある切れは警告。config の rules.anchors が false ならアンカーは見ない）
+ *   7. 新しい文書が、文書群の入口から辿れる（ブリーフに入口があるときだけ。辿れなければ警告）
  *   ほかに警告: 基準点に無い文書・基準点の後のコミット・抑止のマーカー（skip / ignore）の増加
  *
  * 終了コード: 0 = 通過（または git 管理外で検査できない）、1 = 通らない項目がある、2 = 使い方の誤り
@@ -43,8 +47,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { loadConfig, matchesAny, toPosix, isHtmlPath, isProto, DEFAULT_CONFIG, checkDocument, loadStyle, diffIssues } from "../hooks/scripts/check-docs.mjs";
-import { loadBriefs, resolveBrief } from "./brief.mjs";
+import {
+  loadConfig,
+  matchesAny,
+  toPosix,
+  isHtmlPath,
+  isProto,
+  DEFAULT_CONFIG,
+  checkDocument,
+  loadStyle,
+  diffIssues,
+  linksOf,
+  anchorsOf,
+  brokenAnchorIssue,
+} from "../hooks/scripts/check-docs.mjs";
+import { loadBriefs, resolveBrief, entriesOf } from "./brief.mjs";
+import { docsetContext, fsSource, resolveLink, reachOf, mentionedDocs } from "./docset.mjs";
 import { historyFile, historyDir, parseSections, mentions } from "./history.mjs";
 
 const NL = "\n";
@@ -561,6 +579,217 @@ export function protoFiles(dest) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 文書群のつながり（外から入ってくるリンクの切れ・新しい文書が入口から辿れるか）
+// ---------------------------------------------------------------------------
+
+/**
+ * --staged のときの source。コミットに入る中身（index）から読む（setGitContext と同じ扱い）。
+ * 文書1本ごとに git を起動すると文書の多いプロジェクトで遅いので、index と作業ツリーで中身が同じ文書は fs から読み、
+ * 差のある文書（`git diff --name-only`。index と作業ツリーの差。作業ツリーで消した文書を含む）だけ git から読む
+ */
+function stagedSource(dest) {
+  let dirty = null;
+  const dirtySet = () => {
+    if (!dirty) {
+      try {
+        dirty = new Set(git(dest, ["diff", "--name-only", "--relative", "-z"]).split("\0").filter(Boolean).map(toPosix));
+      } catch {
+        dirty = null;
+        return null;
+      }
+    }
+    return dirty;
+  };
+  return {
+    list() {
+      try {
+        return git(dest, ["ls-files", "-z"]).split("\0").filter(Boolean).map(toPosix);
+      } catch {
+        return [];
+      }
+    },
+    read(rel) {
+      const d = dirtySet();
+      if (d && !d.has(rel)) {
+        try {
+          return fs.readFileSync(path.join(dest, rel), "utf-8");
+        } catch {
+          /* index にあるのに作業ツリーに無い（intent-to-add など）。git から読む */
+        }
+      }
+      try {
+        return git(dest, ["show", `:./${rel}`]);
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+/** 文書群の材料（リンクの収集・入口からの到達）。cache（Map）を渡すと1回の実行の中で使い回す（文書の多いコミットでも読み直さない） */
+function docsetFor(dest, { staged, config, briefs, cache }) {
+  const key = staged ? "staged" : "work";
+  if (cache?.has(key)) return cache.get(key);
+  const ctx = docsetContext(dest, { source: staged ? stagedSource(dest) : fsSource(dest), config, briefs });
+  cache?.set(key, ctx);
+  return ctx;
+}
+
+/** 作業前の中身。その文書が無かったなら null（beforeOf は無いときも空文字を返すので、存在の有無はこちらで見る） */
+function beforeTextOrNull(dest, rel, baseline) {
+  if (baseline && hasOwn(baseline.files, rel)) return baseline.files[rel];
+  if (!hasHead(dest)) return null;
+  try {
+    return git(dest, ["show", `${ctx.base}:./${rel}`]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 作業前にあって今は無い文書。`git mv` した文書の旧パス（git は新しいパスだけを変更として出すので changedDocs に載らない）と、
+ * 基準点にあって今は無い文書を含む
+ */
+export function goneDocs(dest, config, staged, baseline = null) {
+  const names = new Set();
+  const add = (out) => out.split("\0").map((s) => s.trim()).filter(Boolean).forEach((f) => names.add(toPosix(f)));
+  try {
+    if (hasHead(dest)) add(git(dest, ["diff", ...(staged ? ["--cached"] : []), ctx.base, "--relative", "--name-only", "--no-renames", "--diff-filter=D", "-z"]));
+  } catch {
+    /* 集められなくても、基準点からは拾える */
+  }
+  if (baseline && !staged) for (const [rel, text] of Object.entries(baseline.files || {})) if (text !== null && !fs.existsSync(path.join(dest, rel))) names.add(rel);
+  const internal = [config.styleDir || "docs-style", config.historyDir || "docs-style/history", config.plansDir || "docs-style/plans"].map((d) => toPosix(d).replace(/\/$/, "") + "/");
+  return [...names].filter(
+    (rel) =>
+      (isHtmlPath(rel) || /\.md$/i.test(rel)) &&
+      !isProto(rel) &&
+      !rel.startsWith(".claude/") &&
+      !internal.some((p) => rel.startsWith(p)) &&
+      matchesAny(rel, config.include || []) &&
+      !matchesAny(rel, config.exclude || [])
+  );
+}
+
+/** 検査が deadline に間に合わなかった（コミット時の検査が、素通りさせずに止める） */
+export class CheckTimeout extends Error {}
+
+/**
+ * 外から入ってくるリンクの切れ。直した文書（消した・`git mv` した文書を含む）を行き先とするリンクを、
+ * include 全体と入口のファイルから集め、リンク元の今の中身 × 行き先の作業前の中身 と × 行き先の今の中身 を比べる。
+ * 作業前は切れていなかったのに今は切れているものを problems に、前から切れているものを warnings に入れる。
+ * 行き先が作業前に無かった（新しい文書）なら、切れは problems（新しい文書へのリンクが最初から切れている）。
+ * ディレクトリへのリンク（`usage/`）は、行き先の index（index.html・index.md・README.md）を消したときも切れとして扱う。
+ * アンカーは config の rules.anchors が false なら見ない（ディレクトリ経由のリンクのアンカーも見ない）。--staged では、リンク元と行き先を index から読む。
+ * 入口が Markdown・HTML でないとき（JavaScript のサイドバー）は、消した・移した文書のファイル名がそこに残っていたら警告にする（止めない）。
+ * deadline（Date.now() の値）を超えたら CheckTimeout を投げる（呼び出し側が止める。素通りさせない）。
+ * 止められたときは、リンク元を直す（--mark --add で基準点に足し、同じ改訂の記録の対象の文書に並べる）。意図して残すリンクは、その行に
+ * `<!-- check-docs: ignore 理由 -->` を書く（リンクの収集から外れる）
+ * 戻り値: [{ rel: 直した文書, problems, warnings }]（切れの無い文書は含めない）
+ */
+export function inboundBreaks(dest, { targets = [], staged = false, config = null, baseline = null, briefs = null, docsetCache = null, deadline = Infinity } = {}) {
+  if (!config?.include) config = loadConfig(dest).config || DEFAULT_CONFIG;
+  const gone = goneDocs(dest, config, staged, baseline);
+  const T = new Set([...targets, ...gone]);
+  const result = [];
+  if (!T.size) return result;
+  const dctx = docsetFor(dest, { staged, config, briefs, cache: docsetCache });
+  const state = new Map();
+  for (const t of T) state.set(t, { before: beforeTextOrNull(dest, t, baseline), now: exists(dest, t, staged) ? after(dest, t, staged) : null });
+  const anchorsOfState = (t, which) => {
+    const text = state.get(t)[which];
+    return text === null ? null : anchorsOf(text, isHtmlPath(t));
+  };
+  // 本文にリンク先のファイル名（日本語は URL エンコードの形も）を含まない文書は、リンクを集めずに省く。
+  // index のように、ディレクトリ名で指されうる行き先があれば、省かない
+  const indexNames = ["index.html", "index.md", "README.md"];
+  let skipNothing = false;
+  const needles = new Set();
+  for (const t of T) {
+    const base = path.posix.basename(t);
+    needles.add(base);
+    needles.add(encodeURI(base));
+    if (indexNames.includes(base)) {
+      const dir = path.posix.dirname(t);
+      if (dir === ".") skipNothing = true;
+      else {
+        const last = path.posix.basename(dir);
+        needles.add(last);
+        needles.add(encodeURI(last));
+      }
+    }
+  }
+  const mayLink = (text) => skipNothing || [...needles].some((n) => text.includes(n));
+  const found = new Map();
+  const entry = (t) => {
+    if (!found.has(t)) found.set(t, { rel: t, problems: [], warnings: [], seen: new Set() });
+    return found.get(t);
+  };
+  const removed = [...T].filter((t) => state.get(t).now === null && state.get(t).before !== null);
+  for (const s of [...dctx.docs, ...dctx.entries]) {
+    if (Date.now() > deadline) throw new CheckTimeout("検査が時間内に終わらなかった");
+    const text = dctx.read(s);
+    if (text === null) continue;
+    if (!isHtmlPath(s) && !/\.md$/i.test(s)) {
+      // 入口が JavaScript など: 消した・移した文書のファイル名が残っていないか
+      if (dctx.entries.has(s) && removed.length)
+        for (const t of mentionedDocs(text, removed)) entry(t).warnings.push(`入口のファイル ${s} に、消した・移した文書 ${t} のファイル名が残っている（入口の一覧から外す）`);
+      continue;
+    }
+    if (!mayLink(text)) continue;
+    const html = isHtmlPath(s);
+    const baseDir = path.join(dest, path.dirname(s));
+    for (const { target, line, nav } of linksOf(text, html)) {
+      const r = resolveLink(dctx.all, s, target);
+      let t = null;
+      if ((r.kind === "ok" || r.kind === "missing") && T.has(r.rel)) t = r.rel;
+      else if (r.kind === "missing" || r.kind === "dir") {
+        // ディレクトリへのリンクの行き先の index を消した
+        t = indexNames.map((n) => (r.rel ? `${r.rel}/${n}` : n)).find((c) => T.has(c) && state.get(c).now === null) || null;
+      }
+      if (!t || t === s) continue;
+      const st = state.get(t);
+      const viaDir = r.kind === "dir" || (r.kind === "missing" && t !== r.rel);
+      const anchorBreak = (which) => {
+        if (viaDir || !nav || !target.includes("#") || state.get(t)[which] === null) return null;
+        return brokenAnchorIssue(target, baseDir, line, { text, isHtml: html }, config, {
+          anchorsFor: (abs) => (toPosix(path.relative(dest, abs)) === t ? anchorsOfState(t, which) : null),
+        });
+      };
+      const nowBroken = st.now === null ? "file" : anchorBreak("now") ? "anchor" : null;
+      if (!nowBroken) continue;
+      const isNew = st.before === null && st.now !== null;
+      const beforeBroken = isNew ? null : st.before === null ? "file" : anchorBreak("before") ? "anchor" : null;
+      const e = entry(t);
+      const key = `${s}:${line}:${target}`;
+      if (e.seen.has(key)) continue;
+      e.seen.add(key);
+      const what =
+        nowBroken === "file"
+          ? `行き先 ${t} が無い（消したか移した文書へのリンク）`
+          : `行き先 ${t} に「#${decodeFrag(target)}」に当たる見出しや id が無い（見出しの文言を変えていないか）`;
+      if (beforeBroken) e.warnings.push(`外から入ってくるリンクが、作業前から切れている: ${s}:${line} の ${target}（${what}）`);
+      else if (isNew) e.problems.push(`新しい文書へのリンクが切れている: ${s}:${line} の ${target}（${what}）。リンクを直す`);
+      else
+        e.problems.push(
+          `外から入ってくるリンクが切れた: ${s}:${line} の ${target}（${what}）。リンク元を直す（--mark --add で基準点に足し、同じ改訂の記録の対象の文書に並べる）。意図して残すなら、その行に <!-- check-docs: ignore 理由 --> を書く`
+        );
+    }
+  }
+  for (const { seen, ...rest } of found.values()) result.push(rest);
+  return result;
+}
+
+function decodeFrag(target) {
+  const frag = target.slice(target.indexOf("#") + 1);
+  try {
+    return decodeURIComponent(frag);
+  } catch {
+    return frag;
+  }
+}
+
 /** 内部の改訂記録の節の規模（見出しの「規模 M」）。無ければ null */
 const sizeOf = (s) => (s.heading.match(/規模\s*([SML])/) || [])[1] || null;
 
@@ -570,7 +799,7 @@ const QUERY_MARK = /<!--\s*問い合わせ\s*[:：]/;
 /** check-docs の指摘が増えたときの問題の書き出し。コミット時の検査が、記録の問題と分けるために使う（skip で通さない） */
 export const CHECK_DOCS_NG = "check-docs の指摘が";
 
-export function checkDoc(dest, rel, { staged = false, allowQueries = false, briefs, config = {}, baseline = null, style = null, strict = false } = {}) {
+export function checkDoc(dest, rel, { staged = false, allowQueries = false, briefs, config = {}, baseline = null, style = null, strict = false, docsetCache = null } = {}) {
   const problems = [];
   const warnings = [];
   const before = (d, p) => beforeOf(d, p, baseline);
@@ -645,6 +874,14 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
       problems.push(`改訂設計書（${planRel}）の「前後確認」が空（既存の文書を変えたときは、compare の結果と事実の変更の一覧を書く）`);
   }
   if (!exists(dest, rel, staged)) return { rel, problems, warnings }; // 削除した文書は記録だけを見る
+  // 新しい文書が、文書群の入口から辿れるか（ブリーフに入口があるときだけ。止めない: 入口の更新を依頼者に任せることがある）
+  if (!before(dest, rel)) {
+    const entries = entriesOf(r.brief);
+    if (entries.length && !entries.includes(rel) && reachOf(docsetFor(dest, { staged, config, briefs, cache: docsetCache }), rel).state === "orphan")
+      warnings.push(
+        `新しい文書が、文書群の入口（${entries.join(", ")}）から辿れない。入口のファイルに足したか確かめる（依頼者に任せるなら、完了報告の「依頼者が次にやること」に書く）`
+      );
+  }
   // 2. 読者向けの改訂履歴
   const docItem = r.brief.docs[r.docKey]?.["読者向けの改訂履歴"]?.value;
   const groupItem = r.brief.group["読者向けの改訂履歴"]?.["読者向けの改訂履歴"]?.value;
@@ -718,7 +955,8 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
     const abs = path.join(dest, rel);
     // 数え方はフックと同じ（check-docs の diffIssues）。ただしリンク切れも比べる（フックだけが毎回止める）。
     // 比べないと、前からあるリンク切れで関係の無い修正の完了とコミットが止まる。リンク先を消したときのリンク切れは、
-    // 前の版でも今の配置で判定されるので、ここでは捕まえられない（既知の制限。その文書を次に書いたときにフックが止める）
+    // 前の版でも今の配置で判定されるので、ここでは捕まえられない。外から入ってくるリンクの切れは inboundBreaks が見る（リンク元の今の中身を、
+    // 行き先の作業前の中身と今の中身の両方と比べる）。ここで見るのは、この文書から出ていくリンクだけ
     const nowIssues = checkDocument(now, { filePath: abs, config, style, format: html ? "html" : "md" });
     const prev = before(dest, rel);
     const oldIssues = prev ? checkDocument(prev, { filePath: abs, config, style, format: html ? "html" : "md" }) : [];
@@ -999,11 +1237,19 @@ function main() {
     process.exit(0);
   }
   const briefs = loadBriefs(dest);
+  const docsetCache = new Map();
   let failed = false;
   for (const rel of targets) {
-    const { problems, warnings } = checkDoc(dest, rel, { staged, allowQueries, briefs, config, baseline, style, strict: true });
+    const { problems, warnings } = checkDoc(dest, rel, { staged, allowQueries, briefs, config, baseline, style, strict: true, docsetCache });
     if (problems.length) failed = true;
     say(`[complete-doc] ${problems.length ? "NG" : "OK"}: ${rel}`);
+    for (const p of problems) say(`  - ${p}`);
+    for (const w of warnings) say(`  - 警告: ${w}`);
+  }
+  // 外から入ってくるリンクの切れ（直した文書を行き先とするリンクを、ほかの文書・入口のファイルから集めて比べる）
+  for (const { rel, problems, warnings } of inboundBreaks(dest, { targets, staged, config, baseline, briefs, docsetCache })) {
+    if (problems.length) failed = true;
+    say(`[complete-doc] ${problems.length ? "NG" : "OK"}: ${rel}（外から入ってくるリンク）`);
     for (const p of problems) say(`  - ${p}`);
     for (const w of warnings) say(`  - 警告: ${w}`);
   }

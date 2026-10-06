@@ -582,9 +582,12 @@ const anchorCache = new Map();
 /**
  * リンクの `#` 以降が、行き先の文書に実在するかを見る。
  * 見るのは、この文書から出ていくリンクだけ（同じ文書内の `#...` と、相対パスの .md / .html）。
- * 行き先の見出しを変えたときに、外から入ってくるリンクが切れるのは、このフックでは見つけられない。
+ * 行き先の見出しを変えたときに、外から入ってくるリンクが切れるのは、このフックでは見つけられない
+ * （完了処理の検査 scripts/complete-doc.mjs が見る）。
+ * anchorsFor（絶対パス → アンカーの集合。行き先が無ければ null）を渡すと、ファイルを読まず・キャッシュも通さずに、それで判定する
+ * （完了処理が、行き先の作業前の中身と今の中身を1回の実行の中で比べるため）
  */
-function brokenAnchorIssue(target, baseDir, lineNo, self, config) {
+export function brokenAnchorIssue(target, baseDir, lineNo, self, config, { anchorsFor = null } = {}) {
   if (config?.rules?.anchors === false) return null;
   if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) return null;
   if (/\$\{|\{\{/.test(target)) return null;
@@ -613,9 +616,14 @@ function brokenAnchorIssue(target, baseDir, lineNo, self, config) {
     resolvedFile = resolved;
     const isHtml = isHtmlPath(resolved);
     if (!isHtml && !/\.md$/i.test(resolved)) return null;
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null; // ファイルの有無はリンク切れの検査が見る
-    if (!anchorCache.has(resolved)) anchorCache.set(resolved, anchorsOf(fs.readFileSync(resolved, "utf-8"), isHtml));
-    anchors = anchorCache.get(resolved);
+    if (anchorsFor) {
+      anchors = anchorsFor(resolved);
+      if (!anchors) return null; // 行き先が無いときは、リンク切れの検査が見る
+    } else {
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null; // ファイルの有無はリンク切れの検査が見る
+      if (!anchorCache.has(resolved)) anchorCache.set(resolved, anchorsOf(fs.readFileSync(resolved, "utf-8"), isHtml));
+      anchors = anchorCache.get(resolved);
+    }
   }
   if (anchors.has(frag) || anchors.has(frag.toLowerCase())) return null;
   return withTarget(
@@ -678,6 +686,41 @@ export function htmlProseLines(text) {
     .map((t, i) => ({ no: i + 1, text: t }));
 }
 
+/**
+ * 文書から出ていく相対リンクの候補を集める（フック・完了処理・文書群の見直し（docset.mjs）で共有する）。
+ * 戻り値: [{ target: リンクの文字列, line: 行番号, nav: アンカーを見てよいリンクか }]
+ * - Markdown: `[文字](行き先)` の形。コードブロックとインラインコードの中・`check-docs: ignore` の行は集めない。nav は常に true
+ * - HTML: href / src の値。コメント・script・style の中は集めない。nav は <a> と <area> の href だけ true
+ *   （SVG の <use href="#icon"> は実行時に差し込む定義への参照で、文書の見出しではない）
+ * 参照形式のリンク（`[文字][名前]` と `[名前]: 行き先`）は集めない
+ */
+export function linksOf(text, isHtml) {
+  const out = [];
+  if (isHtml) {
+    const raw = String(text).replace(/\r\n?/g, "\n");
+    const rawLines = raw.split("\n");
+    const linkSource = raw.replace(HTML_COMMENT, blankKeepLength).replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, blankKeepLength);
+    const aRe = /\b(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+    let m;
+    while ((m = aRe.exec(linkSource)) !== null) {
+      const line = linkSource.slice(0, m.index).split("\n").length;
+      if (lineIgnored(rawLines[line - 1] || "")) continue;
+      const target = decodeEntities((m[1] ?? m[2] ?? "").trim());
+      const tag = (linkSource.slice(linkSource.lastIndexOf("<", m.index), m.index).match(/^<([a-z0-9-]+)/i) || [])[1];
+      out.push({ target, line, nav: /^(a|area)$/i.test(tag || "") && /^href/i.test(m[0]) });
+    }
+    return out;
+  }
+  const linkRe = /\[[^\]]*\]\(([^)\s<>]+)(?:\s+"[^"]*")?\)/g;
+  for (const l of tokenizeLines(text).lines) {
+    if (l.inCode || lineIgnored(l.text)) continue;
+    const t = stripInlineCode(l.text);
+    let m;
+    while ((m = linkRe.exec(t)) !== null) out.push({ target: m[1], line: l.no, nav: true });
+  }
+  return out;
+}
+
 function checkHtml(text, { filePath, config, style }) {
   const issues = [];
   const raw = String(text).replace(/\r\n?/g, "\n");
@@ -709,19 +752,8 @@ function checkHtml(text, { filePath, config, style }) {
   // 5. リンク切れ（href / src の相対パス）
   if (filePath) {
     const baseDir = path.dirname(filePath);
-    const linkSource = raw.replace(HTML_COMMENT, blankKeepLength).replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, blankKeepLength);
-    const aRe = /\b(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
-    let m;
-    while ((m = aRe.exec(linkSource)) !== null) {
-      const lineNo = linkSource.slice(0, m.index).split("\n").length;
-      if (lineIgnored(rawLines[lineNo - 1] || "")) continue;
-      const target = decodeEntities((m[1] ?? m[2] ?? "").trim());
-      // アンカーは <a> と <area> の href だけを見る。SVG の <use href="#icon"> は実行時に差し込む定義への参照で、文書の見出しではない
-      const tag = (linkSource.slice(linkSource.lastIndexOf("<", m.index), m.index).match(/^<([a-z0-9-]+)/i) || [])[1];
-      const isNavLink = /^(a|area)$/i.test(tag || "") && /^href/i.test(m[0]);
-      const issue =
-        brokenLinkIssue(target, baseDir, lineNo) ??
-        (isNavLink ? brokenAnchorIssue(target, baseDir, lineNo, { text: raw, isHtml: true }, config) : null);
+    for (const { target, line, nav } of linksOf(raw, true)) {
+      const issue = brokenLinkIssue(target, baseDir, line) ?? (nav ? brokenAnchorIssue(target, baseDir, line, { text: raw, isHtml: true }, config) : null);
       if (issue) issues.push(issue);
     }
   }
@@ -765,17 +797,9 @@ function checkMarkdown(text, { filePath, config, style }) {
   // 5. リンク切れ
   if (filePath) {
     const baseDir = path.dirname(filePath);
-    const linkRe = /\[[^\]]*\]\(([^)\s<>]+)(?:\s+"[^"]*")?\)/g;
-    for (const l of prose) {
-      if (lineIgnored(l.text)) continue;
-      const t = stripInlineCode(l.text);
-      let m;
-      while ((m = linkRe.exec(t)) !== null) {
-        const issue =
-          brokenLinkIssue(m[1], baseDir, l.no) ??
-          brokenAnchorIssue(m[1], baseDir, l.no, { text, isHtml: false }, config);
-        if (issue) issues.push(issue);
-      }
+    for (const { target, line } of linksOf(text, false)) {
+      const issue = brokenLinkIssue(target, baseDir, line) ?? brokenAnchorIssue(target, baseDir, line, { text, isHtml: false }, config);
+      if (issue) issues.push(issue);
     }
   }
 

@@ -38,11 +38,26 @@ export const GROUP_SECTIONS = {
   事実の承認者: ["承認者"],
   // 置き場所: 「各文書」（既定。各文書の「改訂履歴」の節）か、まとめのページのパス（プロジェクトのルートから。例 web/manual/history.html）
   読者向けの改訂履歴: ["読者向けの改訂履歴", "置き場所"],
+  // 入口のファイル: 目次・索引・サイドバーなど、文書群の文書へ読者を導くファイル（複数はカンマ区切り。プロジェクトのルートからのパス）。
+  // Markdown・HTML とは限らない（サイドバーを JavaScript が持つサイトもある）。未設定でもどの工程も止めない（docset.mjs が「入口が決まっていない」と出す）
+  入口: ["入口のファイル"],
 };
+/**
+ * 文書群の入口のファイル（プロジェクトのルートからのパスの配列）。決まっていなければ空
+ * 値はカンマ（、）区切り。バッククォートで囲んでいてもよい
+ */
+export function entriesOf(brief) {
+  const v = String(brief?.group?.["入口"]?.["入口のファイル"]?.value || "");
+  return v
+    .split(/[,、]/)
+    .map((x) => toPosix(x.replace(/`/g, "").trim()).replace(/^\.\//, ""))
+    .filter((x) => x && !/^（.*）$/.test(x) && !/^なし/.test(x));
+}
+
 /** 文書ごとの決め事の項目 */
 export const DOC_ITEMS = ["ゴール", "文書の種類", "受け入れ基準", "扱わないこと", "読者向けの改訂履歴"];
 
-/** 欠けていれば聞く項目。文書ごとの「扱わないこと」「読者向けの改訂履歴」は文書群の既定を上書きするときだけ書くので、欠けても聞かない */
+/** 欠けていれば聞く項目（「入口」は含めない。決まっていなくても工程は止めず、「仮定」の入口を規模の承認の問いで毎回聞かない）。文書ごとの「扱わないこと」「読者向けの改訂履歴」は文書群の既定を上書きするときだけ書くので、欠けても聞かない */
 const REQUIRED_GROUP = [
   ["読者", "プロファイル"],
   ["読者", "読者像"],
@@ -417,6 +432,7 @@ export function missingItems(brief, docKey) {
     if (!v || !v.value) missing.push(`${section} / ${key}`);
   }
   for (const [section, items] of Object.entries(brief.group)) {
+    if (section === "入口") continue; // 「仮定」の入口は確かめる項目に出さない（setup-project の導入で依頼者に確かめる）
     for (const [key, v] of Object.entries(items)) {
       if (v.value && v.status === "仮定") assumed.push(`${section} / ${key}: ${v.value}`);
     }

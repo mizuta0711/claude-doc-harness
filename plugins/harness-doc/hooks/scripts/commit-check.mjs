@@ -33,7 +33,7 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { loadConfig, DEFAULT_CONFIG, isProto, loadStyle } from "./check-docs.mjs";
-import { changedDocs, checkDoc, setGitContext, planStates, CHECK_DOCS_NG } from "../../scripts/complete-doc.mjs";
+import { changedDocs, checkDoc, setGitContext, planStates, inboundBreaks, CheckTimeout, CHECK_DOCS_NG } from "../../scripts/complete-doc.mjs";
 import { loadBriefs } from "../../scripts/brief.mjs";
 
 const require = createRequire(import.meta.url);
@@ -457,7 +457,9 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
     const working = plans.filter((p) => p.state === "作業中" && p.inCommit);
     const ng = [];
     const docsNg = [];
+    const linkNg = [];
     const warn = [];
+    const docsetCache = new Map();
     // check-docs の指摘が直前のコミットより増えていないかも見る（0.12.0）。書くたびのフックは増えた指摘だけを止めるが、
     // PostToolUse なので止めても書き込みは済んでいる。直さずにコミットが通ると、以後「前からある」になってしまう
     const style = loadStyle(root, config);
@@ -468,7 +470,7 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
       // 止めると、印を消して通すことになり、追跡が失われる（実地検証 P3b の G1）。
       // 0.13.0 から、改訂設計書に問い合わせ表があれば、完了処理の検査と同じく表で照らす: 回答の空の番号は警告、
       // 回答済みの番号・表に無い番号・番号の無い印は止める（allowQueries は表の無いとき＝規模 S の印だけに効く）
-      const { problems, warnings } = checkDoc(root, rel, { staged: true, briefs, config, allowQueries: true, style });
+      const { problems, warnings } = checkDoc(root, rel, { staged: true, briefs, config, allowQueries: true, style, docsetCache });
       const plan = working.find((p) => p.docs.includes(rel));
       if (problems.length && plan) warn.push(`${rel}: 改訂設計書 ${plan.file} が作業中なので警告にとどめた — ${problems.join(" / ")}`);
       else if (problems.length) {
@@ -480,15 +482,35 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
       }
       for (const w of warnings) warn.push(`${rel}: ${w}`);
     }
+    // 外から入ってくるリンクの切れ（直した文書を行き先とするリンクを、リンク元の index の中身から見る）。記録の承認（doc-record: skip）では通さない
+    let inbound;
+    try {
+      inbound = inboundBreaks(root, { targets, staged: true, config, briefs, docsetCache, deadline });
+    } catch (e) {
+      if (!(e instanceof CheckTimeout)) throw e;
+      return { decision: mode === "warn" ? "warn" : "deny", lines: ["検査が時間内に終わらなかった。文書を分けてコミットする"] };
+    }
+    for (const { rel, problems, warnings } of inbound) {
+      const plan = working.find((p) => p.docs.includes(rel));
+      if (problems.length && plan) warn.push(`${rel}: 改訂設計書 ${plan.file} が作業中なので警告にとどめた — ${problems.join(" / ")}`);
+      else if (problems.length) linkNg.push(`${rel}: ${problems.join(" / ")}`);
+      for (const w of warnings) warn.push(`${rel}: ${w}`);
+    }
     for (const p of plans) if (p.state === "作業中" && p.ageDays > 7) warn.push(`改訂設計書 ${p.file} が「作業中」のまま ${p.ageDays} 日たっている。終えたか、やめたかを確かめる`);
-    if (!ng.length && !docsNg.length) return { decision: warn.length ? "warn" : "allow", lines: warn };
-    if (mode === "warn") return { decision: "warn", lines: [...docsNg, ...ng, ...warn] };
-    if (docsNg.length)
+    if (!ng.length && !docsNg.length && !linkNg.length) return { decision: warn.length ? "warn" : "allow", lines: warn };
+    if (mode === "warn") return { decision: "warn", lines: [...docsNg, ...linkNg, ...ng, ...warn] };
+    if (docsNg.length || linkNg.length)
       return {
         decision: "deny",
         lines: [
           ...docsNg,
-          "書いた文書の check-docs の指摘が、直前のコミットより増えている。指摘を直してからコミットする（doc-record: skip では通らない。前からある指摘は直さなくてよい）",
+          ...(docsNg.length
+            ? ["書いた文書の check-docs の指摘が、直前のコミットより増えている。指摘を直してからコミットする（doc-record: skip では通らない。前からある指摘は直さなくてよい）"]
+            : []),
+          ...linkNg,
+          ...(linkNg.length
+            ? ["直した文書を行き先とするリンクが、ほかの文書・入口のファイルで切れている。リンク元を直し、同じ改訂の記録の対象の文書に並べてからコミットする（doc-record: skip では通らない。前からある切れは直さなくてよい）"]
+            : []),
           ...ng,
           ...warn,
         ],

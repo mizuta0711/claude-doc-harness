@@ -7,7 +7,7 @@
  *   node show.mjs profile <名前>      読者プロファイル（beginner / engineer / operator / developer）
  *   node show.mjs reference <名前>    知見のまとめ（structure / writing / japanese / web / accessibility）
  *   node show.mjs claude-section     プロジェクトの CLAUDE.md に置く「文書ルール（harness-doc）」の節の最新版
- *   node show.mjs path <名前>         plan-doc の経路の手順（S / M / L / tone / finish）
+ *   node show.mjs path <名前>         plan-doc の経路の手順（S / M / L / tone / finish / docset）
  *   node show.mjs plan-template      改訂設計書の雛形
  *   node show.mjs style-readme       docs-style/README.md の最新版（導入済みのプロジェクトと比べるとき）
  *   node show.mjs writer-handoff     本文を別のエージェントに書かせるときに渡す全文（manual-writer の規則を抜き出して足す）
@@ -101,7 +101,7 @@ function main() {
         .map((f) => f.replace(/\.md$/, ""))
         .join("|");
     process.stderr.write(
-      `usage: node show.mjs voices | visuals | claude-section | plan-template | style-readme | writer-handoff | path <S|M|L|tone|finish|questions> | profile <${list("profiles")}> | reference <${list("references")}>\n`
+      `usage: node show.mjs voices | visuals | claude-section | plan-template | style-readme | writer-handoff | path <S|M|L|tone|finish|docset|questions> | profile <${list("profiles")}> | reference <${list("references")}>\n`
     );
     process.exit(1);
   }
