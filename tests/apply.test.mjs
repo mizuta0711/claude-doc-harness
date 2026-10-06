@@ -105,6 +105,13 @@ test("--config: 配列は置き換え、voice は合成し、知らないキー�
   assert.throws(() => mergeConfig(cur, { inclde: [] }), /知らない設定キー: inclde/);
 });
 
+test("--config: requiredHeadings は種類ごとに置き換わり、ほかの種類は残る（setup-project が既存の見出しに合わせる）", async () => {
+  const { mergeConfig } = await import("../plugins/harness-doc/skills/setup-project/scripts/apply.mjs");
+  const cur = { requiredHeadings: { howto: ["できること", "前提条件", "手順"], reference: ["一覧"] } };
+  const out = mergeConfig(cur, { requiredHeadings: { howto: ["できること", "準備", "手順"] } });
+  assert.deepEqual(out.requiredHeadings, { howto: ["できること", "準備", "手順"], reference: ["一覧"] });
+});
+
 test("--config CLI: 導入済みの config に書き込む。未導入なら止まる", () => {
   const dest = tmp();
   const run = (args) => spawnSync(process.execPath, [scriptPath, "--dest", dest, ...args], { encoding: "utf-8" });
