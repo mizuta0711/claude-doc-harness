@@ -173,17 +173,41 @@ function writesFile(text) {
  * コマンドを読み、コミットごとに { dir, args, ops: [{sub, args, dir}] } を返す。
  * 再現できない形なら { unsupported: "理由" } を返す
  */
+/**
+ * 覚えた変数を置き換える。`"$P"` は引用符ごと1語に、引用符なしの `$P` は bash と同じく空白で語に分かれるように、値をそのまま入れる。
+ * 単引用符の中（`'$P'`）は bash では展開しないので、単引用符を含む文は置き換えない
+ */
+export function substituteVars(text, vars) {
+  // 単引用符で囲まれた区間はそのまま残し、外側だけを置き換える（`-m 'docs: x' -- $P` の $P は置き換える）
+  return text
+    .split(/('[^']*')/)
+    .map((part) => {
+      if (part.startsWith("'") && part.endsWith("'") && part.length >= 2) return part;
+      let out = part;
+      for (const [name, value] of vars) out = out.replace(new RegExp(`\\$\\{${name}\\}|\\$${name}(?![A-Za-z0-9_])`, "g"), value);
+      return out;
+    })
+    .join("");
+}
+
 export function readCommand(command, { shell = "bash", cwd }) {
   const opts = { shell };
   const text = stripHeredocs(String(command || ""), shell).replace(/\d*>&(?:\d+|-)/g, " ").replace(/&>/g, ">");
-  const segs = scope.scanCommands(text, opts).map((s) => ({ ...s, text: stripKeyword(s.text) }));
+  const raw = scope.scanCommands(text, opts);
+  // if・for・while・case の中の代入は、どの値が使われるかを順に読んでも決められない。変数を覚えない（置き換えずに、今までどおり読む）
+  const controlFlow = raw.some((s) => /^\s*(if|then|else|elif|fi|for|while|until|do|done|case|esac)\b/.test(s.text));
+  const segs = raw.map((s) => ({ ...s, text: stripKeyword(s.text) }));
   let dir = cwd;
   // 再現できない形を止めるかは、ここまでに出てきたフォルダーのどれかが文書ハーネスのプロジェクトかで決める（確かめ直し N2）
   const dirs = [cwd];
   const ops = [];
   const commits = [];
   const unsupported = (reason) => ({ unsupported: reason, dirs: [...new Set(dirs.filter(Boolean))] });
-  for (const seg of segs) {
+  // 文だけの変数の代入（`P="a.md b.md"`）を覚え、後ろの `$P`・`"$P"`・`${P}` を置き換えてから読む（B1 の評価 #12）。
+  // 値に引用符・バックスラッシュ・$・`・(・;・& を含むものは覚えない（置き換えると区切りが崩れる）。bash だけ
+  const vars = new Map();
+  for (const seg0 of segs) {
+    const seg = shell === "powershell" || !vars.size ? seg0 : { ...seg0, text: substituteVars(seg0.text, vars) };
     const inner = wrapped(seg.text);
     if (inner !== null) {
       const r = readCommand(inner, { shell: /^(pwsh|powershell)/i.test(seg.text) ? "powershell" : "bash", cwd: dir });
@@ -213,6 +237,13 @@ export function readCommand(command, { shell = "bash", cwd }) {
     }
     if (!g) {
       const tokens = scope.tokenize(seg.text, opts).map((t) => t.value);
+      const asg = shell !== "powershell" && tokens.length === 1 ? tokens[0].match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s) : null;
+      if (asg) {
+        // 作業ツリーを変えない。置き換えられる値だけを覚え、覚えられない値なら前の値を消す（古い値で置き換えない）
+        if (!controlFlow && /^[^"'\\$`();&|<>]*$/.test(asg[2])) vars.set(asg[1], asg[2]);
+        else vars.delete(asg[1]);
+        continue;
+      }
       const name = (tokens[0] || "").split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, "");
       if (DIR_COMMANDS.has(name)) {
         if (tokens[1] === "-") return unsupported("cd - の行き先を決められない"); // 確かめ直し N7
@@ -434,7 +465,9 @@ export function checkCommit(commit, { shell = "bash", command = "", deadline = I
       // フックの時間切れは素通りになるので、予算を超えたら止める（文書の多いコミット。査読 P3）
       if (Date.now() > deadline) return { decision: mode === "warn" ? "warn" : "deny", lines: ["検査が時間内に終わらなかった。文書を分けてコミットする"] };
       // 問い合わせの印は警告にとどめる。印は改訂設計書の「問い合わせ」で管理していて、依頼者の回答を待つあいだ残るのが正しい状態。
-      // 止めると、印を消して通すことになり、追跡が失われる（実地検証 P3b の G1）。完了報告の前の検査（complete-doc）は今どおり NG
+      // 止めると、印を消して通すことになり、追跡が失われる（実地検証 P3b の G1）。
+      // 0.13.0 から、改訂設計書に問い合わせ表があれば、完了処理の検査と同じく表で照らす: 回答の空の番号は警告、
+      // 回答済みの番号・表に無い番号・番号の無い印は止める（allowQueries は表の無いとき＝規模 S の印だけに効く）
       const { problems, warnings } = checkDoc(root, rel, { staged: true, briefs, config, allowQueries: true, style });
       const plan = working.find((p) => p.docs.includes(rel));
       if (problems.length && plan) warn.push(`${rel}: 改訂設計書 ${plan.file} が作業中なので警告にとどめた — ${problems.join(" / ")}`);

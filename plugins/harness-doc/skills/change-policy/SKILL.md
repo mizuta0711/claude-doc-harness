@@ -24,7 +24,7 @@ allowed-tools: "Bash(node:*), Bash(ls:*), Bash(git status:*), Read, Glob, Grep, 
 | 文書に当たるブリーフ | `node "${CLAUDE_SKILL_DIR}/../../scripts/brief.mjs" show <文書のパス>` |
 | ブリーフに書く | `node "${CLAUDE_SKILL_DIR}/../setup-project/scripts/apply.mjs" --brief '<JSON>'` |
 
-`.claude/` 配下は `Read` も `Edit` もしない。上のスクリプトを通す。質問は `AskUserQuestion` で選択肢として出す（1回4問まで。推奨を先頭に「（推奨）」）。
+`.claude/` 配下は `Read` も `Edit` もしない。上のスクリプトを通す。質問は `AskUserQuestion` で選択肢として出す（1回4問まで。推奨を先頭に「（推奨）」。**依頼者だけが知っている事実の問いには推奨を付けない**。`node "${CLAUDE_SKILL_DIR}/../../presets/show.mjs" path questions` の 1）。
 
 ## Step 1: 何を、どの範囲で変えるかを決める
 

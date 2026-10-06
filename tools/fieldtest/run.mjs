@@ -13,7 +13,7 @@
  * シナリオ（ES モジュール）が書き出すもの:
  *   cwd: 写しのパス
  *   steps: [{ id, prompt }]
- *   answer(question, ctx): 問い1つへの答え。選択肢のラベルか自由入力の文字列。null なら「推奨」を選ぶ
+ *   answer(question, ctx): 問い1つへの答え。選択肢のラベルか自由入力の文字列。null なら default-answer.mjs の既定（推奨。事実の確認・推奨の無い問いは控えめな選択肢）
  *       question = { question, header, options: [{label, description}], multiSelect }
  *       ctx = { step, seen }（seen は手順ごとの、規則が数えるための入れ物）
  *   approve(toolName, input, ctx): フックが承認を求めたとき（ask）。true で承認、false で拒否
@@ -22,6 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { defaultAnswer } from "./default-answer.mjs";
 
 const args = process.argv.slice(2);
 const scenarioPath = args.find((a) => !a.startsWith("--"));
@@ -45,8 +46,6 @@ const say = (s) => {
 };
 const record = (o) => fs.appendFileSync(qaFile, JSON.stringify({ at: new Date().toISOString(), ...o }) + "\n");
 
-/** 推奨の選択肢（ラベルに「推奨」）。無ければ最初の選択肢 */
-const recommended = (q) => (q.options.find((o) => /推奨/.test(o.label)) || q.options[0]).label;
 
 let current = null; // 今の手順
 const seen = {};
@@ -57,9 +56,10 @@ const canUseTool = async (toolName, input) => {
     const answers = {};
     for (const q of input.questions || []) {
       let a = scenario.answer ? scenario.answer(q, ctx) : null;
-      if (a === null || a === undefined) a = recommended(q);
+      let how = "scenario";
+      if (a === null || a === undefined) ({ answer: a, reason: how } = defaultAnswer(q));
       answers[q.question] = a;
-      record({ step: current, kind: "question", header: q.header, question: q.question, options: q.options.map((o) => o.label), multiSelect: !!q.multiSelect, answer: a });
+      record({ step: current, kind: "question", header: q.header, question: q.question, options: q.options.map((o) => o.label), multiSelect: !!q.multiSelect, answer: a, how });
       say(`問い（${current}）: ${q.header || ""} ${q.question.slice(0, 80)} → ${a}`);
     }
     return { behavior: "allow", updatedInput: { questions: input.questions, answers } };

@@ -5,7 +5,7 @@
  *   node complete-doc.mjs --mark [--reset] [--dest <project-dir>] [文書のパス...]   作業を始める前の基準点を記録する
  *   node complete-doc.mjs --mark --add [文書のパス...]     作業の途中で直す文書が増えたとき、基準点に足す（記録済みは上書きしない）
  *   node complete-doc.mjs --clear                          何も変えずに作業を終えたとき、基準点を消す
- *   node complete-doc.mjs compare <文書...>                基準点と今の文書の数値・見出しを比べる（前後確認）
+ *   node complete-doc.mjs compare [--limit <倍率>] <文書...>  基準点と今の文書の数値・見出しを比べる（前後確認）。--limit は改訂設計書の分量の上限
  *   node complete-doc.mjs restore <文書...>                文書を基準点の中身に戻す（依頼者が「やり直す」を選んだとき）
  *   node complete-doc.mjs [--dest <project-dir>] [--staged] [--allow-queries] [文書のパス...]
  *
@@ -350,7 +350,54 @@ export function parsePlan(text) {
     }
   }
   const beforeAfter = (planSection(src, "前後確認") || "").replace(/<!--[\s\S]*?-->/g, "").trim();
-  return { state: row("状態"), docs, unchecked, beforeAfter };
+  // 問い合わせの表: 番号 → 回答（空なら未回答）。B1 の評価 #3（印を残すのは未回答の番号だけ）
+  const queries = new Map();
+  // 回答の列は見出しの「回答」の位置で読む（列の欠けた行で、ほかの列を回答と読まない）。番号のセルは強調・コードを外す
+  const qBody = planSection(src, "問い合わせ");
+  const qHead = tableHeader(qBody);
+  const ansCol = qHead ? qHead.findIndex((c) => /回答/.test(c)) : -1;
+  for (const r of tableRows(qBody)) {
+    const no = (r[0] || "").replace(/[*`]/g, "").trim();
+    if (/^Q\d+$/.test(no)) queries.set(no, ansCol >= 0 ? (r[ansCol] || "").trim() : "");
+  }
+  // 分量の上限: 「今の 1.5 倍まで」の数値。無ければ null（B1 の評価 #6）
+  const lim = row("分量の上限").match(/(\d+(?:\.\d+)?)\s*倍/);
+  // 読者役の指摘と、仕様と実装の食い違い（0.13.0 の雛形から。節が無い古い設計書は null）
+  const reviewBody = planSection(src, "読者役の指摘");
+  const mismatchBody = planSection(src, "食い違い");
+  return {
+    state: row("状態"),
+    docs,
+    unchecked,
+    beforeAfter,
+    queries,
+    limit: lim ? Number(lim[1]) : null,
+    reviewRows: reviewBody === null ? null : tableRows(reviewBody).length,
+    // 依頼者の選択（最後の列）が空の食い違い
+    mismatchOpen: mismatchBody === null ? [] : tableRows(mismatchBody).filter((r) => !(r[r.length - 1] || "").trim()).map((r) => r[0]),
+  };
+}
+
+/** 節の中の最初の表の見出しの行（セルの配列。無ければ null） */
+function tableHeader(body) {
+  if (!body) return null;
+  const l = String(body)
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split("\n")
+    .find((x) => /^\s*\|/.test(x));
+  return l ? l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim()) : null;
+}
+
+/** 節の中の表の行（見出しの行と区切りの行を除く）。セルの配列の配列 */
+function tableRows(body) {
+  if (!body) return [];
+  const rows = String(body)
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split("\n")
+    .filter((l) => /^\s*\|/.test(l));
+  return rows
+    .filter((l, i) => i > 0 && !/^\s*\|[\s:|-]+\|\s*$/.test(l))
+    .map((l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim()));
 }
 
 /**
@@ -496,6 +543,7 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
     if (left.length) problems.push(`試作のファイルが残っている: ${left.join(", ")}（見本を改訂設計書の「試作」の節に写してから消す）`);
   }
   // 改訂設計書: 規模 M・L の改訂（テイスト変更を含む）には要る。未チェックの基準・タスクと、前後確認の空を止める
+  const docPlans = [];
   for (const s of added) {
     const size = sizeOf(s);
     if (size !== "M" && size !== "L") continue;
@@ -515,6 +563,11 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
       continue;
     }
     const plan = parsePlan(planText);
+    docPlans.push({ planRel, plan });
+    if (plan.reviewRows === 0)
+      problems.push(`改訂設計書（${planRel}）の「読者役の指摘」の表が空（読者役の結果が返ったら、直す前に指摘と対応を写す）`);
+    if (plan.mismatchOpen.length)
+      problems.push(`改訂設計書（${planRel}）の「食い違い」に、依頼者の選択が空の行がある: ${plan.mismatchOpen.slice(0, 3).join(" / ")}（完了前の確認で依頼者に選んでもらう）`);
     if (plan.unchecked.length)
       problems.push(`改訂設計書（${planRel}）に未チェックの受け入れ基準・タスクが残っている: ${plan.unchecked.slice(0, 3).join(" / ")}${plan.unchecked.length > 3 ? " ほか" : ""}（満たさないと決めたものは、行を消さずに末尾に「対象外（理由）」と書く）`);
     if (before(dest, rel) && exists(dest, rel, staged) && !plan.beforeAfter)
@@ -536,10 +589,41 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
     else if (old !== null && cur.trim() === old.trim()) problems.push("読者向けの改訂履歴が「あり」なのに、改訂履歴の節に行が足されていない");
   }
   // 3. 問い合わせの印（コードの中は見ない）
-  if (QUERY_MARK.test(html ? stripHtmlCode(now) : stripMdCode(now))) {
-    const msg = "本文に問い合わせの印（<!-- 問い合わせ: -->）が残っている。依頼者の回答で解消したら印を消す";
-    (allowQueries ? warnings : problems).push(msg);
+  const body = html ? stripHtmlCode(now) : stripMdCode(now);
+  if (QUERY_MARK.test(body)) {
+    const withTable = docPlans.filter((p) => p.plan.queries.size);
+    if (withTable.length) {
+      // 改訂設計書の問い合わせ表で見る（B1 の評価 #3）: 未回答の番号の印は残ってよい（警告）。
+      // 回答済みの番号・表に無い番号の印は NG（回答を本文に反映していない・表に載せていない）
+      const answer = (no) => withTable.map((p) => p.plan.queries.get(no)).find((a) => a !== undefined);
+      // 1つの印に番号が2つ以上あれば全部読む。番号の無い印は NG（表と照らせない。並列の書き手の印の振り直し忘れ）
+      const marks = [...body.matchAll(/<!--\s*問い合わせ\s*[:：]([\s\S]*?)-->/g)].map((m) => m[1]);
+      const nums = marks.flatMap((m) => m.match(/Q\d+/g) || []);
+      const noNumber = marks.filter((m) => !/Q\d+/.test(m)).length;
+      if (noNumber) problems.push(`番号の無い問い合わせの印が ${noNumber} 個ある（改訂設計書の問い合わせ表の番号「Q1」を書く）`);
+      const open = nums.filter((n) => answer(n) === "");
+      const answered = nums.filter((n) => answer(n));
+      const unknown = nums.filter((n) => answer(n) === undefined);
+      if (open.length) warnings.push(`未回答の問い合わせの印: ${[...new Set(open)].join("・")}（回答を待つあいだ残る。完了報告の「問い合わせ」に全部載せる）`);
+      if (answered.length) problems.push(`回答済みの問い合わせの印が残っている: ${[...new Set(answered)].join("・")}（回答を本文に反映して印を消す）`);
+      if (unknown.length) problems.push(`改訂設計書の問い合わせ表に無い番号の印: ${[...new Set(unknown)].join("・")}（表に載せる）`);
+    } else {
+      const msg = "本文に問い合わせの印（<!-- 問い合わせ: -->）が残っている。依頼者の回答で解消したら印を消す";
+      (allowQueries ? warnings : problems).push(msg);
+    }
   }
+  // 分量の上限（改訂設計書の「分量の上限」。B1 の評価 #6）。超えたら完了前の確認で判断を求める
+  const prevBody = before(dest, rel);
+  for (const { planRel, plan } of docPlans) {
+    if (!plan.limit || !prevBody) continue;
+    const ratio = bodyChars(now, html) / Math.max(1, bodyChars(prevBody, html));
+    if (ratio > plan.limit)
+      warnings.push(`本文の字数が改訂設計書（${planRel}）の分量の上限（${plan.limit} 倍）を超えた（${ratio.toFixed(2)} 倍）。完了前の確認で判断を求める`);
+  }
+  // 推量の表現（B1 の評価 #14）。書かないことに入っているが、並列の書き手に渡らず残った。増えたら警告
+  const guess = (s) => (String(s || "").match(/はずです|はずだ|かもしれ|可能性があります/g) || []).length;
+  const g = guess(body) - guess(prevBody ? (html ? stripHtmlCode(prevBody) : stripMdCode(prevBody)) : "");
+  if (g > 0) warnings.push(`推量の表現（はずです・かもしれ・可能性があります）が作業前より ${g} 件増えた。確かめて言い切るか、問い合わせにする`);
   // 4. check-docs の指摘が作業前より増えていないか（Bash で書き換えるとフックが働かないので、ここで捕まえる）
   if (style) {
     const abs = path.join(dest, rel);
@@ -559,12 +643,31 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
     warnings.push("検査の抑止（check-docs: skip / ignore）が作業前より増えている。理由が書いてあるか、docs-style/README.md の場合に当たるかを確かめる");
   // 5. 改行コード（基準点と比べるときだけ。HEAD の中身は git の設定 core.autocrlf で改行コードが変わって見えるため）
   const prevText = inBaseline && !staged ? before(dest, rel) : "";
-  if (prevText) {
+  if (prevText && !gitNormalizesEol(dest, rel)) {
     const crlf = (s) => /\r\n/.test(s);
     if (crlf(prevText) !== crlf(now))
       warnings.push(`改行コードが作業前（${crlf(prevText) ? "CRLF" : "LF"}）から変わっている。差分がファイル全体に出る（Bash の置き換えで起きやすい。Edit で書き直す）`);
   }
   return { rel, problems, warnings };
+}
+
+/**
+ * git がコミットのときに改行コードを揃えるか（.gitattributes の text / eol か、core.autocrlf）。
+ * 揃えるなら、作業ツリーの改行コードの違いは git の変換の結果なので警告しない（B1 の評価 #13）
+ */
+function gitNormalizesEol(dest, rel) {
+  try {
+    const out = execFileSync("git", ["-C", dest, "check-attr", "text", "eol", "--", rel], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+    const attr = (name) => (out.match(new RegExp(`: ${name}: (\\S+)`)) || [])[1];
+    const text = attr("text");
+    const eol = attr("eol");
+    if (text === "unset") return false; // -text: 変換しない
+    if (text === "set" || text === "auto" || (eol && eol !== "unspecified")) return true;
+    const ac = execFileSync("git", ["-C", dest, "config", "--get", "core.autocrlf"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return ac === "true" || ac === "input";
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +724,7 @@ export function compareDoc(beforeText, afterText, html) {
   return { before: b, after: a, ratio, added, removed, condition };
 }
 
-function printCompare(rel, r, say) {
+function printCompare(rel, r, say, limit = null) {
   say(`[complete-doc] ${rel}`);
   if (!r.before) {
     say(`  新しい文書: ${r.after.lines}行・本文 ${r.after.chars}字・見出し ${r.after.headings.length}・図 ${r.after.figures}・問い合わせの印 ${r.after.queries}`);
@@ -636,6 +739,8 @@ function printCompare(rel, r, say) {
   if (r.added.length) say(`  増えた見出し: ${r.added.join(" / ")}`);
   if (r.removed.length) say(`  消えた見出し: ${r.removed.join(" / ")}`);
   if (r.condition) say("  ⚠️ 本文の字数が 1.5 倍以上か 0.67 倍以下に変わった。前後確認を必須にする（S なら完了報告の問いに前後確認を含める）");
+  // 改訂設計書の分量の上限（B1 の評価 #6）。超えたら完了前の確認で判断を求める
+  if (limit && r.ratio !== null && r.ratio > limit) say(`  ⚠️ 改訂設計書の分量の上限（${limit} 倍）を超えた（${r.ratio.toFixed(2)} 倍）。完了前の確認で判断を求める`);
 }
 
 function main() {
@@ -647,6 +752,7 @@ function main() {
   let add = false;
   let reset = false;
   let clear = false;
+  let limit = null;
   const files = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -657,12 +763,20 @@ function main() {
     else if (a === "--add") add = true;
     else if (a === "--reset") reset = true;
     else if (a === "--clear") clear = true;
+    else if (a === "--limit") {
+      limit = Number(args[++i]);
+      // 値が無い（次の文書のパスを飲む）・数でない形を止める
+      if (!(limit > 0)) {
+        process.stderr.write("--limit には正の倍率を渡す（改訂設計書に分量の上限が無ければ --limit を付けない）" + NL);
+        process.exit(2);
+      }
+    }
     else if (a === "-h" || a === "--help") {
       process.stdout.write(
         "usage: node complete-doc.mjs --mark [--reset] [文書のパス...]  作業前の基準点を記録する（--reset で作り直す）\n" +
           "       node complete-doc.mjs --mark --add [文書のパス...]      直す文書が増えたとき、基準点に足す\n" +
           "       node complete-doc.mjs --clear                           何も変えずに作業を終えたとき、基準点を消す\n" +
-          "       node complete-doc.mjs compare <文書のパス...>           基準点と今の文書の数値と見出しを比べる（前後確認）\n" +
+          "       node complete-doc.mjs compare [--limit <倍率>] <文書のパス...>  基準点と今の文書の数値と見出しを比べる（前後確認）。--limit は改訂設計書の分量の上限\n" +
           "       node complete-doc.mjs restore <文書のパス...>           文書を基準点の中身に戻す（依頼者が「やり直す」を選んだとき）\n" +
           "       node complete-doc.mjs [--dest <project-dir>] [--staged] [--allow-queries] [文書のパス...]" +
           NL
@@ -714,7 +828,7 @@ function main() {
         bad = true;
         continue;
       }
-      if (sub === "compare") printCompare(rel, compareDoc(b.files[rel], readOrNull(dest, rel) ?? "", isHtmlPath(rel)), say);
+      if (sub === "compare") printCompare(rel, compareDoc(b.files[rel], readOrNull(dest, rel) ?? "", isHtmlPath(rel)), say, limit);
       else {
         const abs = path.join(dest, rel);
         if (b.files[rel] === null) fs.rmSync(abs, { force: true });

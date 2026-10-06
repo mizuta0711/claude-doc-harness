@@ -461,7 +461,13 @@ function brokenLinkIssue(target, baseDir, lineNo) {
   }
   const resolved = path.resolve(baseDir, decoded);
   if (fs.existsSync(resolved)) return null;
-  return { line: lineNo, kind: "link", message: `リンク切れ: ${target}` };
+  return withTarget({ line: lineNo, kind: "link", message: `リンク切れ: ${target}` }, resolved);
+}
+
+/** リンクの指摘に行き先のファイル（絶対パス）を持たせる。列挙されないプロパティにして、指摘の比べ方とテストを変えない */
+function withTarget(issue, resolved) {
+  Object.defineProperty(issue, "target", { value: resolved, enumerable: false });
+  return issue;
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +546,7 @@ function brokenAnchorIssue(target, baseDir, lineNo, self, config) {
   }
   const filePart = target.slice(0, hash).split("?")[0];
   let anchors;
+  let resolvedFile = null;
   if (!filePart) {
     anchors = anchorsOf(self.text, self.isHtml);
   } else {
@@ -550,6 +557,7 @@ function brokenAnchorIssue(target, baseDir, lineNo, self, config) {
       /* そのまま */
     }
     const resolved = path.resolve(baseDir, decoded);
+    resolvedFile = resolved;
     const isHtml = isHtmlPath(resolved);
     if (!isHtml && !/\.md$/i.test(resolved)) return null;
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null; // ファイルの有無はリンク切れの検査が見る
@@ -557,11 +565,14 @@ function brokenAnchorIssue(target, baseDir, lineNo, self, config) {
     anchors = anchorCache.get(resolved);
   }
   if (anchors.has(frag) || anchors.has(frag.toLowerCase())) return null;
-  return {
-    line: lineNo,
-    kind: "link",
-    message: `アンカー切れ: ${target}（行き先に「#${frag}」に当たる見出しや id が無い。見出しの文言を変えていないか確かめる。描画の作り方が GitHub と違うなら config の rules.anchors を false に）`,
-  };
+  return withTarget(
+    {
+      line: lineNo,
+      kind: "link",
+      message: `アンカー切れ: ${target}（行き先に「#${frag}」に当たる見出しや id が無い。見出しの文言を変えていないか確かめる。描画の作り方が GitHub と違うなら config の rules.anchors を false に）`,
+    },
+    resolvedFile
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -837,10 +848,47 @@ export function changedIssues(absPath, result, config, style) {
   const { added, groups, kept } = diffIssues(result.issues, prevIssues);
   // 比べずに止める指摘（リンク切れ）が前の版にもあったなら、そう添える（範囲の外を直しに行くかを Claude が決められるように）
   const preexisting = new Set(groups.filter((g) => ALWAYS_REPORT.has(g.kind) && g.before > 0).map((g) => `${g.kind}\u0000${g.message}`));
-  const issues = added.map((i) => (preexisting.has(`${i.kind}\u0000${i.message}`) ? { ...i, message: `${i.message}（直前のコミットにもある。リンク切れは前からあっても止める）` } : i));
+  const issues = added.map((i) =>
+    preexisting.has(`${i.kind}\u0000${i.message}`) ? withTarget({ ...i, message: `${i.message}（直前のコミットにもある。リンク切れは前からあっても止める）` }, i.target) : i
+  );
   const notes = groups.filter((g) => !ALWAYS_REPORT.has(g.kind) && g.total > g.extra).map((g) => `「${g.message}」は ${g.total} 件のうち ${g.extra} 件が増えた（どれが新しいかは決められないので全部出した）`);
   if (kept) notes.push(`前からある指摘 ${kept} 件は止めていない（直前のコミットにもある。直す依頼のときに直す）`);
   return { issues, note: notes.join("\n  "), kept };
+}
+
+/**
+ * 作業中の基準点（scripts/complete-doc.mjs --mark が .git/harness-doc/baseline.json に残す）に登録された文書の集合
+ * （プロジェクトからの相対パス）。基準点が無い・通過済み・その後にコミットがあれば null（古い基準点で本物のリンク切れを逃さない）
+ */
+export function plannedDocs(dir) {
+  const run = (args) => {
+    const r = spawnSync("git", ["-C", dir, ...args], { encoding: "utf-8", windowsHide: true });
+    return r.status === 0 ? r.stdout.trim() : null;
+  };
+  const gdir = run(["rev-parse", "--git-dir"]);
+  const head = run(["rev-parse", "HEAD"]);
+  if (!gdir || !head) return null;
+  try {
+    const b = JSON.parse(fs.readFileSync(path.join(path.resolve(dir, gdir), "harness-doc", "baseline.json"), "utf-8"));
+    if (b.passed || b.head !== head || !b.files) return null;
+    return new Set(Object.keys(b.files).map((k) => path.posix.normalize(toPosix(k))));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 書きかけの文書へのリンク切れ・アンカー切れを止めない（B1 の評価 #7）。並列で書いている最中は、行き先のページがまだ無いか、
+ * 見出しの id がまだ無い。行き先が作業中の基準点に登録された文書（自分自身は除く）なら外し、件数を返す。最終の確認は完了処理の検査
+ */
+export function deferPlanned(issues, dir, self = null) {
+  const planned = issues.some((i) => i.kind === "link" && i.target) ? plannedDocs(dir) : null;
+  if (!planned) return { issues, deferred: 0 };
+  const own = self ? path.resolve(self) : null;
+  const keep = issues.filter(
+    (i) => !(i.kind === "link" && i.target && path.resolve(i.target) !== own && planned.has(toPosix(path.relative(dir, i.target))))
+  );
+  return { issues: keep, deferred: issues.length - keep.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -862,13 +910,19 @@ function mainHook() {
   const result = checkFile(abs, dir, config, style);
   if (!result || result.issues.length === 0) process.exit(0);
 
-  const { issues, note, kept } = changedIssues(abs, result, config, style);
+  const changed = changedIssues(abs, result, config, style);
+  const { issues, deferred } = deferPlanned(changed.issues, dir, abs);
+  const deferNote = deferred ? `作業中の文書（作業前の基準点に登録された、書きかけの文書）へのリンク切れ・アンカー切れ ${deferred} 件は止めていない（完了処理の検査で見る）` : "";
   if (!issues.length) {
-    // 前からある指摘だけ: 止めずに Claude に伝える（PostToolUse の additionalContext）
-    const msg = `[check-docs] ${result.rel}: 前からある指摘 ${kept} 件（直前のコミットにもある。直す依頼のときに直す。今は直さなくてよい）`;
+    // 前からある指摘・書きかけの文書へのリンクだけ: 止めずに Claude に伝える（PostToolUse の additionalContext）
+    const parts = [];
+    if (changed.kept) parts.push(`前からある指摘 ${changed.kept} 件（直前のコミットにもある。直す依頼のときに直す。今は直さなくてよい）`);
+    if (deferNote) parts.push(deferNote);
+    const msg = `[check-docs] ${result.rel}: ${parts.join("。")}`;
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: msg } }) + "\n");
     process.exit(0);
   }
+  const note = [changed.note, deferNote].filter(Boolean).join("\n  ");
   process.stderr.write(formatIssues(result.rel, issues) + (note ? `\n  ${note}` : "") + "\n");
   process.exit(2);
 }
