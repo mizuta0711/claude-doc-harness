@@ -16,6 +16,17 @@ node run.mjs scenarios/p3b.mjs
 - ログは `out/<シナリオ>-<時刻>/`（`qa.jsonl`: 問いと答え・承認の求め・各手順の結果。`run.log`: 経過。`session.txt`: セッションの id）。`out/` はコミットしない
 - 途中から続けるときは `--resume <セッションの id> --from <手順の id>`
 
+## 台本の置き場所
+
+**このリポジトリは公開している。** `scenarios/` に置いた台本はコミットされて公開される。
+
+| 台本の中身 | 置き場所 |
+|---|---|
+| 依頼文が一般的（「全体を書き直して」「ハーネスを入れて」）・写しのプロジェクトで走らせる | `scenarios/`（コミットする） |
+| 適用先の非公開の事実を含む（製品の弱点・公開していない URL・依頼者の判断の中身・業務の固有名） | `scenarios/private/`（git の対象外。`node run.mjs scenarios/private/xxx.mjs`） |
+
+`scenarios/private/` の台本は手元にしか残らない。依頼文を後から見返す必要があるなら、検証の記録を残す非公開のリポジトリに写す。
+
 ## 判定
 
 この道具は判定しない。判定の正は Claude Code のセッションのログ（`~/.claude/projects/<写しのパス>/<セッションの id>.jsonl`）で、DocumentTemplete の実施記録で判定する。

@@ -6,3 +6,4 @@ node_modules/
 Thumbs.db
 Desktop.ini
 tools/fieldtest/out/
+tools/fieldtest/scenarios/private/
