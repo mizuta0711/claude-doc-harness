@@ -37,7 +37,9 @@ export const GROUP_SECTIONS = {
   読者: ["プロファイル", "読者像", "読む状況"],
   事実の承認者: ["承認者"],
   // 置き場所: 「各文書」（既定。各文書の「改訂履歴」の節）か、まとめのページのパス（プロジェクトのルートから。例 web/manual/history.html）
-  読者向けの改訂履歴: ["読者向けの改訂履歴", "置き場所"],
+  // 対象のアプリの版: 事実を確かめた改訂の行に「（アプリ 1.2 で確認）」を添えるか。値は「書かない」（既定）か、版を読む場所（例: `app/build.gradle` の `versionName`）。
+  //   決まっていなくても、どの工程も止めない（「仮定」を確かめる項目にも出さない）。機械では検査しない
+  読者向けの改訂履歴: ["読者向けの改訂履歴", "置き場所", "対象のアプリの版"],
   // 入口のファイル: 目次・索引・サイドバーなど、文書群の文書へ読者を導くファイル（複数はカンマ区切り。プロジェクトのルートからのパス）。
   // Markdown・HTML とは限らない（サイドバーを JavaScript が持つサイトもある）。未設定でもどの工程も止めない（docset.mjs が「入口が決まっていない」と出す）
   入口: ["入口のファイル"],
@@ -434,6 +436,7 @@ export function missingItems(brief, docKey) {
   for (const [section, items] of Object.entries(brief.group)) {
     if (section === "入口") continue; // 「仮定」の入口は確かめる項目に出さない（setup-project の導入で依頼者に確かめる）
     for (const [key, v] of Object.entries(items)) {
+      if (key === "対象のアプリの版") continue; // 入口と同じ。「仮定」の対象のアプリの版を、規模の承認の問いで毎回聞かない
       if (v.value && v.status === "仮定") assumed.push(`${section} / ${key}: ${v.value}`);
     }
   }

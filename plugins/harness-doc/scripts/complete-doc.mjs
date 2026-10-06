@@ -63,7 +63,7 @@ import {
 } from "../hooks/scripts/check-docs.mjs";
 import { loadBriefs, resolveBrief, entriesOf } from "./brief.mjs";
 import { docsetContext, fsSource, resolveLink, reachOf, mentionedDocs } from "./docset.mjs";
-import { historyFile, historyDir, parseSections, mentions } from "./history.mjs";
+import { historyFile, historyDir, parseSections, mentions, sourcesOf } from "./history.mjs";
 
 const NL = "\n";
 
@@ -830,6 +830,17 @@ export function checkDoc(dest, rel, { staged = false, allowQueries = false, brie
         "直そうとせず、完了報告に「基準点が無く判定できなかった」と書き、今回足した節を示す。" +
         "今から --mark して検査し直さない（今の状態が作業前になり、同じ節を二重に足すことになる）。次の作業からは、始めに --mark を走らせる"
     );
+  // 根拠があるのに確かめたソースが無い（記録の抜け。陳腐化の追随は、確かめたソースから候補を出す）。
+  // この文書群の記録に確かめたソースを書いた節が1つでもあるとき（追随を使い始めた文書群）だけ。使い始める前の記録に、毎回の警告を出さない。
+  // 根拠にファイルのパスらしい語（拡張子付きの語・/ を含む語）が無い節（依頼者の判断だけ）にも出さない
+  const adopted = nowSections.some((x) => sourcesOf(x).length);
+  for (const s of added) {
+    const basis = String(s.items["根拠"] || "").trim();
+    if (adopted && basis && !/^(なし|対象外|[-ー－—]+$)/.test(basis) && /[\w-]+\.[A-Za-z0-9]{1,8}\b|\//.test(basis) && !sourcesOf(s).length)
+      warnings.push(
+        `内部の改訂記録（${hFile}）の節「${s.heading}」に、根拠はあるが確かめたソースが無い（本文の事実が依存するファイルを、ルートからのパスで書く。陳腐化の追随が使う）`
+      );
+  }
   if (diff.rewritten)
     warnings.push(
       `内部の改訂記録（${hFile}）の過去の節が書き換えられているか消されている（過去の節は書き換えない）: ${diff.gone.map((s) => `「${s.heading}」`).join("・")}`

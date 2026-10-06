@@ -18,6 +18,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadConfig, toPosix } from "../hooks/scripts/check-docs.mjs";
 import { loadBriefs, resolveBrief } from "./brief.mjs";
@@ -28,7 +29,7 @@ export const TEMPLATE = path.resolve(here, "..", "presets", "history-template.md
 export const DEFAULT_HISTORY_DIR = "docs-style/history";
 
 /** 節の項目（この順に書く） */
-export const ITEMS = ["改訂箇所", "改訂内容", "改訂意図", "根拠", "見送ったこと・決めたこと", "依頼のきっかけ", "読者向けの改訂履歴", "変更者・承認者", "改訂設計書"];
+export const ITEMS = ["改訂箇所", "改訂内容", "改訂意図", "根拠", "確かめたソース", "見送ったこと・決めたこと", "依頼のきっかけ", "読者向けの改訂履歴", "変更者・承認者", "改訂設計書"];
 const REQUIRED = ["改訂箇所", "改訂内容", "改訂意図", "読者向けの改訂履歴", "変更者・承認者"];
 
 export function historyDir(dest) {
@@ -90,6 +91,70 @@ export function mentions(section, docKey) {
   return targets.includes(docKey);
 }
 
+/**
+ * 項目「確かめたソース」の値を、プロジェクトのルートからのパスの配列にする（検査はしない）。
+ * カンマ（, 、）区切り。各要素から、バッククォート・引用符と、末尾の `:行`（`:12`・`:12-34`）を外す。文字列か配列を受ける。
+ */
+export function normalizeSources(value) {
+  const list = Array.isArray(value) ? value : String(value ?? "").split(/[,、]/);
+  const out = [];
+  for (let x of list) {
+    x = String(x).trim().replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, "").trim();
+    x = x.replace(/:\d+(?:[-–]\d+)?$/, "").replace(/#L\d+(?:-L?\d+)?$/, "");
+    x = toPosix(x).replace(/^\.\//, "");
+    if (x && !out.includes(x)) out.push(x);
+  }
+  return out;
+}
+
+/** 節の項目「確かめたソース」から、パスの配列 */
+export function sourcesOf(section) {
+  const v = section?.items?.["確かめたソース"];
+  return v ? normalizeSources(v) : [];
+}
+
+/**
+ * 「確かめたが変更なし」の節か（文書群の見直しで、候補を人が確かめて文書を直さなかったときに足す節）。
+ * 改訂箇所が「なし…」・改訂内容が「変更なし…」・読者向けの改訂履歴が「対象外…」
+ */
+export function isConfirmOnly(section) {
+  const it = section?.items || {};
+  return (
+    /^なし/.test(String(it["改訂箇所"] || "").trim()) &&
+    /^変更なし/.test(String(it["改訂内容"] || "").trim()) &&
+    /^対象外/.test(String(it["読者向けの改訂履歴"] || "").trim())
+  );
+}
+
+/**
+ * 確かめたソースの各パスを検査する。プロジェクトのルートからのパス（絶対パス・`..` を含まない）で、実在するファイルで、git が追跡していること。
+ * git の管理下でなければ、実在だけを見る。戻り値: 問題の文字列の配列（問題が無ければ空）。git は1回だけ呼ぶ
+ */
+export function checkSources(dest, list) {
+  const problems = [];
+  const candidates = [];
+  for (const rel of list) {
+    const abs = path.join(dest, rel);
+    if (path.isAbsolute(rel) || /^[a-z]:/i.test(rel) || rel.split("/").includes("..")) problems.push(`${rel}（プロジェクトのルートからのパスでない）`);
+    else if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) problems.push(`${rel}（実在するファイルでない）`);
+    else candidates.push(rel);
+  }
+  if (!candidates.length) return problems;
+  let tracked = null;
+  try {
+    const out = execFileSync("git", ["-C", dest, "--literal-pathspecs", "ls-files", "-z", "--", ...candidates], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    tracked = new Set(out.split("\0").filter(Boolean).map(toPosix));
+  } catch {
+    tracked = null; // git の管理下でない・git が無い: 追跡は確かめない
+  }
+  if (tracked) for (const rel of candidates) if (!tracked.has(rel)) problems.push(`${rel}（git が追跡していない。別のリポジトリのファイルか、まだ add していない。大文字小文字の違いなら、git が記録している綴りに合わせる）`);
+  return problems;
+}
+
 const cell = (s) => String(s ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
 
 function today() {
@@ -116,6 +181,7 @@ export function renderSection(input, date = today()) {
 /**
  * 節を1つ足す。必須の項目（改訂箇所・改訂内容・改訂意図・読者向けの改訂履歴・変更者・承認者）が空なら書かない。
  * input: { doc: "<文書のパス>" | docs: [...], 改訂箇所, 改訂内容, 改訂意図, 根拠?, ..., version?, size?, label?, date? }
+ * 確かめたソース（任意）は、ルートからのパスのカンマ区切り（か配列）。正規化して、実在・git の追跡を確かめ、外れていれば書かずにエラーにする
  * 記録のファイルが無ければ、ブリーフの文書群の名前で雛形から作る。
  */
 export function addSection(dest, input, date = today()) {
@@ -123,6 +189,16 @@ export function addSection(dest, input, date = today()) {
   if (!docs.length) throw new Error("doc（文書のパス）か docs（文書のパスの配列）を渡す");
   const empty = REQUIRED.filter((k) => !input[k] || !String(input[k]).trim());
   if (empty.length) throw new Error(`空の項目があるので書かない: ${empty.join("・")}（改訂意図は空にしない。誤字の修正なら「誤字の修正」）`);
+  // 確かめたソース: 正規化して、ルートからのパス・実在・追跡を確かめる（外れていれば書かない）
+  if (input["確かめたソース"] !== undefined && input["確かめたソース"] !== null && String(input["確かめたソース"]).trim() !== "") {
+    const sources = normalizeSources(input["確かめたソース"]);
+    const bad = checkSources(dest, sources);
+    if (bad.length) throw new Error(`確かめたソースが書けない: ${bad.join(" / ")}。プロジェクトのルートからのパスで、git が追跡しているファイルだけを書く`);
+    input = { ...input, 確かめたソース: sources.join(", ") };
+  } else if (isConfirmOnly({ items: { 改訂箇所: input["改訂箇所"], 改訂内容: input["改訂内容"], 読者向けの改訂履歴: input["読者向けの改訂履歴"] } })) {
+    // 「確かめたが変更なし」の節は、確かめたソースが基準点を進める唯一の中身。無ければ何も消さない（完了処理は走らせないので、書き込みのときに止める）
+    throw new Error("「確かめたが変更なし」の節には、確かめたソースが要る（無いと、候補は消えない）");
+  }
   const located = docs.map((d) => ({ d, ...locate(dest, toPosix(path.isAbsolute(d) ? path.relative(dest, d) : d)) }));
   const bad = located.filter((l) => l.status !== "ok");
   if (bad.length) throw new Error(`ブリーフが当たらない（または2つ当たる）文書がある: ${bad.map((b) => b.d).join(", ")}。先にブリーフを決める`);
