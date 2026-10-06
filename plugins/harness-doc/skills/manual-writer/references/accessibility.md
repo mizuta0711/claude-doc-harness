@@ -12,6 +12,8 @@
 | WCAG 2.2 日本語訳（WAIC。本文に「作業進行中」・参考資料とある） | https://waic.jp/translations/WCAG22/ | 2026-10-02 |
 | Understanding 1.3.1 / 1.3.3 / 2.4.4 / 1.4.10 | https://www.w3.org/WAI/WCAG22/Understanding/ 配下 | 2026-10-02 |
 | Techniques G141 / H51 / H57 | https://www.w3.org/WAI/WCAG22/Techniques/ 配下 | 2026-10-02 |
+| Technique H86（ASCII アート・絵文字のテキストの代替） | https://www.w3.org/WAI/WCAG22/Techniques/html/H86 | 2026-10-06 |
+| WAI-ARIA 1.2 の img ロール（Children Presentational: True・名前が必須） | https://www.w3.org/TR/wai-aria-1.2/#img | 2026-10-06 |
 | W3C Images Tutorial（装飾画像・複雑な画像） | https://www.w3.org/WAI/tutorials/images/ | 2026-10-02 |
 
 ## 要点
@@ -37,6 +39,7 @@
 19. **国内の目標は AA。** ガイドブックは「原則 AA に適合させることを目標」としている。政府調達の標準は JIS X 8341-3:2016 の AA 準拠。AAA 準拠を目指すことは推奨していない（出典: ガイドブック p.19・p.38 / 適合レベル）
 20. **JIS X 8341-3:2016 は WCAG 2.0 と同じ内容の一致規格**（出典: ガイドブック p.15）
 21. **事業者にとっての位置づけ。** 2024-04-01 施行の改正障害者差別解消法で、事業者による合理的配慮が義務になった。ウェブアクセシビリティはその環境整備として努力義務とされている（出典: ガイドブック p.5）
+22. **ASCII アート（文字の擬似図）には、テキストの代替を付ける。** H86 は ASCII アートが「スクリーンリーダーでインターネットを使う人をとても混乱させうる」とし、`role="img"` と `aria-label`、`<figure>` と `<figcaption>`、読み飛ばすリンク、直前か直後の文での説明のどれかを求めている。Markdown では ARIA を書けないので、直前か直後に同じ内容を文で書く。CSS で組んだ画面のモックも、画面の文字がばらばらに読まれる同じ問題を持つので、`role="img"` と要約の `aria-label` を付ける（ハーネスの判断。H86 の対象は ASCII アート。`role="img"` の子要素は読み上げで提示されない、は WAI-ARIA の img ロールの定義による）（出典: https://www.w3.org/WAI/WCAG22/Techniques/html/H86 / 1.1.1）
 
 ## 書くときのチェック項目
 

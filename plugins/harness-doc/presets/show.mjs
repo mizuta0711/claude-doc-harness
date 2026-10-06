@@ -74,6 +74,7 @@ export function writerHandoff() {
   for (const [h, title] of [
     ["## Step 2: 事実を確認する", "## 事実の確認（manual-writer の Step 2）"],
     ["### 書き方の規則", "## 書き方の規則（manual-writer の Step 4）"],
+    ["### 図と画面", "## 図と画面（manual-writer の Step 4）"],
     ["### 書かないこと", "## 書かないこと（manual-writer の Step 4）"],
     ["## Step 5: 自己点検する", "## 自己点検（manual-writer の Step 5）"],
   ]) {

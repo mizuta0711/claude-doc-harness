@@ -784,7 +784,11 @@ function bodyChars(text, html) {
   return s.replace(/\s+/g, "").length;
 }
 
-/** 図の数: <img>・<svg>・<figure>・Markdown の画像・mermaid のコードブロック（CSS で描いた図は数えない） */
+/**
+ * 図の数: <img>・<svg>・<figure>・Markdown の画像・mermaid のコードブロック。
+ * <figure> で括った CSS の図は数えるが、role="img" だけの CSS のモックと、Markdown の文字の擬似図（ふつうのコードブロック）は数えない
+ * （コードと見分けられない）。前後確認の目安で、検査の合否には使わない
+ */
 function figuresOf(text, html) {
   const s = String(text || "");
   if (html) return (s.match(/<(img|svg|figure)\b/gi) || []).length;

@@ -242,8 +242,9 @@ test("実行役の既定の答え: 事実の確認の問いと推奨の無い問
 
 test("show.mjs writer-handoff: 事実の確認（止まる操作を含む）・書き方の規則・書かないこと・自己点検を抜き出して足す", () => {
   const out = writerHandoff();
-  for (const h of ["## 事実の確認（manual-writer の Step 2）", "## 書き方の規則（manual-writer の Step 4）", "## 書かないこと（manual-writer の Step 4）", "## 自己点検（manual-writer の Step 5）", "## 参照の読み方"]) assert.ok(out.includes(h), h);
+  for (const h of ["## 事実の確認（manual-writer の Step 2）", "## 書き方の規則（manual-writer の Step 4）", "## 図と画面（manual-writer の Step 4）", "## 書かないこと（manual-writer の Step 4）", "## 自己点検（manual-writer の Step 5）", "## 参照の読み方"]) assert.ok(out.includes(h), h);
   assert.match(out, /緊急番号/);
+  assert.match(out, /撮るときの手順/, "0.17.0: 図と画面の節が並列の書き手に渡る");
   assert.doesNotMatch(out, /<プラグイン>/);
   assert.equal(extractSection("# a\n## b\nx\n### c\ny\n## d\nz\n", "## b"), "## b\nx\n### c\ny");
   assert.equal(extractSection("## b\n```\n## not\n```\nx\n## d\n", "## b"), "## b\n```\n## not\n```\nx");
